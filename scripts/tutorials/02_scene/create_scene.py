@@ -1,14 +1,9 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers.
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
-
 """This script demonstrates how to use the interactive scene interface to setup a scene with multiple prims.
 
 .. code-block:: bash
 
     # Usage
-    ./isaaclab.sh -p scripts/tutorials/02_scene/create_scene.py --num_envs 32
+    ./isaaclab.sh -p scripts/tutorials/02_scene/create_scene_wake.py --num_envs 32
 
 """
 
@@ -40,15 +35,11 @@ from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.sim import SimulationContext
 from isaaclab.utils import configclass
-
-##
-# Pre-defined configs
-##
 from isaaclab_assets import CARTPOLE_CFG  # isort:skip
 
 
 @configclass
-class CartpoleSceneCfg(InteractiveSceneCfg):
+class B99SceneCfg(InteractiveSceneCfg):
     """Configuration for a cart-pole scene."""
 
     # ground plane
@@ -115,7 +106,7 @@ def main():
     # Set main camera
     sim.set_camera_view([2.5, 0.0, 4.0], [0.0, 0.0, 2.0])
     # Design scene
-    scene_cfg = CartpoleSceneCfg(num_envs=args_cli.num_envs, env_spacing=2.0)
+    scene_cfg = B99SceneCfg(num_envs=args_cli.num_envs, env_spacing=2.0)
     scene = InteractiveScene(scene_cfg)
     # Play the simulator
     sim.reset()
