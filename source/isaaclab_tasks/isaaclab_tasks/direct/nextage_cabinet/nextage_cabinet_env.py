@@ -137,17 +137,17 @@ class NextageCabinetEnvCfg(DirectRLEnvCfg):
                 "rh_THJ2": 0.0,
                 "rh_THJ1": 0.0,
             },
-            pos=(1.4, 0.0, 0.5),
+            pos=(1.3, 0.0, 0.5),
             rot=(0.0, 0.0, 0.0, 1.0),
         ),
         actuators={
-            "left_arm": ImplicitActuatorCfg(
-                joint_names_expr=["LARM_JOINT[0-5]"],
-                effort_limit=50.0,
-                velocity_limit=1.5,
-                stiffness=100.0,
-                damping=5.0,
-            ),
+            #"left_arm": ImplicitActuatorCfg(
+            #    joint_names_expr=["LARM_JOINT[0-5]"],
+            #    effort_limit=50.0,
+            #    velocity_limit=1.5,
+            #    stiffness=100.0,
+            #    damping=5.0,
+            #),
             "right_arm": ImplicitActuatorCfg(
                 joint_names_expr=["RARM_JOINT[0-5]"],
                 effort_limit=50.0,
@@ -162,13 +162,13 @@ class NextageCabinetEnvCfg(DirectRLEnvCfg):
             #     stiffness=50.0,
             #     damping=2.0,
             # ),
-            # "right_hand": ImplicitActuatorCfg(
-            #     joint_names_expr=["rh_.*"],
-            #     effort_limit=20.0,
-            #     velocity_limit=1.0,
-            #     stiffness=50.0,
-            #     damping=2.0,
-            # ),
+            "right_hand": ImplicitActuatorCfg(
+                joint_names_expr=["rh_.*"],
+                effort_limit=20.0,
+                velocity_limit=1.0,
+                stiffness=50.0,
+                damping=2.0,
+            ),
         },
     )
 
@@ -323,8 +323,8 @@ class NextageCabinetEnv(DirectRLEnv):
         )
 
         self.hand_link_idx = self._robot.find_bodies("RARM_JOINT5_Link")[0][0]  # or whatever is the palm link
-        self.left_finger_link_idx = self._robot.find_bodies("rh_thdistal")[0][0]
-        self.right_finger_link_idx = self._robot.find_bodies("rh_mfdistal")[0][0]
+        self.left_finger_link_idx = self._robot.find_bodies("rh_mfdistal")[0][0]
+        self.right_finger_link_idx = self._robot.find_bodies("rh_thdistal")[0][0]
         self.drawer_link_idx = self._cabinet.find_bodies("drawer_top")[0][0]
 
         self.robot_grasp_rot = torch.zeros((self.num_envs, 4), device=self.device)
