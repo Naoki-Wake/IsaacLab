@@ -86,8 +86,8 @@ GR1T2_CFG = ArticulationCfg(
             ],
             effort_limit=torch.inf,
             velocity_limit=torch.inf,
-            stiffness=None,
-            damping=None,
+            stiffness=12000,
+            damping=300,
             armature=0.0,
         ),
         "left-arm": ImplicitActuatorCfg(
@@ -98,8 +98,8 @@ GR1T2_CFG = ArticulationCfg(
             ],
             effort_limit=torch.inf,
             velocity_limit=torch.inf,
-            stiffness=None,
-            damping=None,
+            stiffness=12000,
+            damping=300,
             armature=0.0,
         ),
         "right-hand": ImplicitActuatorCfg(
@@ -108,8 +108,8 @@ GR1T2_CFG = ArticulationCfg(
             ],
             effort_limit=None,
             velocity_limit=None,
-            stiffness=None,
-            damping=None,
+            stiffness=12000,
+            damping=300,
         ),
         "left-hand": ImplicitActuatorCfg(
             joint_names_expr=[
@@ -117,8 +117,8 @@ GR1T2_CFG = ArticulationCfg(
             ],
             effort_limit=None,
             velocity_limit=None,
-            stiffness=None,
-            damping=None,
+            stiffness=12000,
+            damping=300,
         ),
     },
 )

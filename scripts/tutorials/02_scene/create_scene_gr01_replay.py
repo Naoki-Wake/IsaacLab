@@ -66,7 +66,7 @@ import pandas as pd
 import torch.nn.functional as F
 import threading
 import sys
-
+import math
 
 output_status = False
 
@@ -181,9 +181,17 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     # drive.CreateStiffnessAttr(0.0)  # 必要に応じて設定
     # Replace with your joint path
     joint_prim_path = "/World/envs/env_0/Robot/joints/right_wrist_yaw_joint"
-    set_joint_drive_parameters(sim, joint_prim_path, stiffness=10000.0, damping=500.0, max_force=100.0)
+    #set_joint_drive_parameters(sim, joint_prim_path, stiffness=10000.0, damping=500.0, max_force=100.0)
     joint_prim_path = "/World/envs/env_0/Robot/joints/left_wrist_yaw_joint"
-    set_joint_drive_parameters(sim, joint_prim_path, stiffness=10000.0, damping=500.0, max_force=100.0)
+    #set_joint_drive_parameters(sim, joint_prim_path, stiffness=10000.0, damping=500.0, max_force=100.0)
+    joint_prim_path = "/World/envs/env_0/Robot/joints/R_pinky_proximal_joint"
+
+    #get_joint_idx(scene, "R_pinky_proximal_joint"),
+    #get_joint_idx(scene, "R_ring_proximal_joint"),
+    #get_joint_idx(scene, "R_middle_proximal_joint"),
+    #get_joint_idx(scene, "R_index_proximal_joint"),
+    #get_joint_idx(scene, "R_thumb_proximal_pitch_joint"),
+    #get_joint_idx(scene, "L_thumb_proximal_yaw_joint"),
     # right_arm indexes
     import numpy as np
     right_arm_idx = np.array([
@@ -208,27 +216,31 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     print("left_arm_idx", left_arm_idx)
     # left hand indexes
     left_hand_idx = np.array([
-        get_joint_idx(scene, "L_pinky_intermediate_joint"),
-        get_joint_idx(scene, "L_ring_intermediate_joint"),
-        get_joint_idx(scene, "L_middle_intermediate_joint"),
-        get_joint_idx(scene, "L_index_intermediate_joint"),
+        get_joint_idx(scene, "L_pinky_proximal_joint"),
+        get_joint_idx(scene, "L_ring_proximal_joint"),
+        get_joint_idx(scene, "L_middle_proximal_joint"),
+        get_joint_idx(scene, "L_index_proximal_joint"),
+        get_joint_idx(scene, "L_thumb_proximal_pitch_joint"),
         get_joint_idx(scene, "L_thumb_proximal_yaw_joint"),
-        get_joint_idx(scene, "L_thumb_distal_joint"),
     ])
     # right hand indexes
     right_hand_idx = np.array([
-        get_joint_idx(scene, "R_pinky_intermediate_joint"),
-        get_joint_idx(scene, "R_ring_intermediate_joint"),
-        get_joint_idx(scene, "R_middle_intermediate_joint"),
-        get_joint_idx(scene, "R_index_intermediate_joint"),
+        get_joint_idx(scene, "R_pinky_proximal_joint"),
+        get_joint_idx(scene, "R_ring_proximal_joint"),
+        get_joint_idx(scene, "R_middle_proximal_joint"),
+        get_joint_idx(scene, "R_index_proximal_joint"),
+        get_joint_idx(scene, "R_thumb_proximal_pitch_joint"),
         get_joint_idx(scene, "R_thumb_proximal_yaw_joint"),
-        get_joint_idx(scene, "R_thumb_distal_joint"),
     ])
+    print("right_hand_idx", right_hand_idx)
     # waist indexes
     waist_idx = np.array([
         get_joint_idx(scene, "waist_yaw_joint"),
         get_joint_idx(scene, "waist_pitch_joint"),
         get_joint_idx(scene, "waist_roll_joint"),
+    ])
+    head_pitch_idx = np.array([
+        get_joint_idx(scene, "head_pitch_joint"),
     ])
 
     policy_client = RobotInferenceClient(host="10.137.70.15", port=5555)
@@ -258,7 +270,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     # print(example)
     # print(example[0])
     # Simulation loop
-    read_idx = 0
+    read_idx = 150
     image_buffer = []
     while simulation_app.is_running():
         if count == 0:
@@ -317,6 +329,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             read_idx += 1
             image_buffer.append(ego_view)
             print("read_idx", read_idx)
+
             if read_idx >= len(all_actions):
                 import cv2
                 import numpy as np
@@ -335,20 +348,35 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                     video_writer.write(image)
 
                 video_writer.release()
+                simulation_app.close()
                 exit(0)
             # print("action", action)
-        assert action is not None, "Action is None. Please check the server connection."
-        action_right_arm = action[0:7]
-        action_left_arm = action[7:14]
-        action_waist = action[14:17]
-        action_right_hand = action[17:23]
-        action_left_hand = action[23:29]
+            assert action is not None, "Action is None. Please check the server connection."
+            action_right_arm = action[0:7]
+            action_left_arm = action[7:14]
+            action_waist = action[14:17]
+            action_right_hand = action[17:23]
+            action_left_hand = action[23:29]
+ 
+            # clamp action and flip values except for the last one (thumb_proximal_pitch_joint)
+            action_right_hand[0:4] = -1* action_right_hand[0:4]
+            action_right_hand[0:4] = np.clip(action_right_hand[0:4], -math.pi/2, 0.0)
+            action_right_hand[4] = np.clip(action_right_hand[4], 0.0, math.pi/3)
+            action_right_hand[5] = -1* action_right_hand[5]
+            action_right_hand[5] = np.clip(action_right_hand[5], -math.pi/2, 0.0)
+            action_left_hand[0:4] = -1* action_left_hand[0:4]
+            action_left_hand[0:4] = np.clip(action_left_hand[0:4], -math.pi/2, 0.0)
+            action_left_hand[4] = np.clip(action_left_hand[4], 0.0, math.pi/3)
+            action_left_hand[5] = -1* action_left_hand[5]
+            action_left_hand[5] = np.clip(action_left_hand[5], -math.pi/2, 0.0)
 
+
+        print("action_right_hand (clamped)", action_right_hand)
         #joint_pos_des = robot.data.default_joint_pos.clone()
         if count == 0:
             joint_pos_des = robot.data.default_joint_pos.clone()
         else:
-            joint_pos_des = robot.data.joint_pos.clone()
+            joint_pos_des = robot.data.default_joint_pos.clone() #robot.data.joint_pos.clone()
         # import pdb; pdb.set_trace()
         if output_status:
             print("joint_pos_des", joint_pos_des)
@@ -357,18 +385,32 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         left_hand_action = torch.tensor(action_left_hand, device=joint_pos_des.device, dtype=joint_pos_des.dtype)
         right_hand_action = torch.tensor(action_right_hand, device=joint_pos_des.device, dtype=joint_pos_des.dtype)
         waist_action = torch.tensor(action_waist, device=joint_pos_des.device, dtype=joint_pos_des.dtype)
-
+        #right_hand_action = -right_hand_action
+        #right_hand_action = torch.clamp(right_hand_action, -math.pi / 2, 0.0)
+        #right_hand_action[:-1] = -right_hand_action[:-1]
+        #left_hand_action = -left_hand_action
+        #left_hand_action = torch.clamp(left_hand_action, -math.pi / 2, 0.0)
+        #left_hand_action[:-1] = -left_hand_action[:-1]
         # set joint pos
         joint_pos_des[:, right_arm_idx] = right_arm_action
         joint_pos_des[:, left_arm_idx] = left_arm_action
         joint_pos_des[:, left_hand_idx] = left_hand_action
         joint_pos_des[:, right_hand_idx] = right_hand_action
+        #print(joint_pos_des[:, 51])
+        #print(right_hand_idx[debug_idx])
+        #print(right_hand_action[debug_idx])
         joint_pos_des[:, waist_idx] = waist_action
-
+        #print("right_hand_action", right_hand_action)
+        #print(right_arm_idx)
+        #print(right_hand_idx)
         # Apply actions
         # Set joint position target
+        # tilt head
+        joint_pos_des[:, head_pitch_idx] = math.pi/15
         robot.set_joint_position_target(joint_pos_des)
-
+        diff = robot.data.joint_pos.clone() - joint_pos_des
+        print(diff[:, right_hand_idx])
+        #robot.write_data_to_sim()
         scene.write_data_to_sim()
         sim.step()
         # Increment counter
@@ -382,7 +424,7 @@ def main():
     sim_cfg = sim_utils.SimulationCfg(device=args_cli.device)
     sim = SimulationContext(sim_cfg)
     # Set main camera
-    sim.set_camera_view([2.0, -1.4, 2.3], [0.0, 0.0, 1.0])
+    sim.set_camera_view([-0.6, 0.93, 2.4], [0.0, 0.0, 1.0])
     # Design scene
     scene_cfg = MySceneCfg(num_envs=args_cli.num_envs, env_spacing=2.0)
     scene = InteractiveScene(scene_cfg)
