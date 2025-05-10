@@ -79,6 +79,8 @@ class MeshConverter(AssetConverterBase):
             RuntimeError: If the conversion using the Omniverse asset converter fails.
         """
         # resolve mesh name and format
+        print(f"Converting {cfg.asset_path} to USD...")
+        print(os.path.basename(cfg.asset_path).split("."))
         mesh_file_basename, mesh_file_format = os.path.basename(cfg.asset_path).split(".")
         mesh_file_format = mesh_file_format.lower()
 
