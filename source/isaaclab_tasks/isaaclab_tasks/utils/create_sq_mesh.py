@@ -1,6 +1,7 @@
 import pyvista as pv
 import os
 import sys
+import numpy as np
 
 # Read output directory from command-line argument
 if len(sys.argv) < 2:
@@ -11,12 +12,12 @@ output_dir = sys.argv[1]
 os.makedirs(output_dir, exist_ok=True)
 
 # Fixed values for e1 and e2
-e1_values = [0.3, 0.5, 0.7, 1.0]
-e2_values = [0.3, 0.5, 0.7, 1.0]
+e1_values = [1e-10]
+e2_values = [1e-10] + np.arange(0.1, 2.0, 0.1).tolist() + [2.0]
 
 def float_to_str(x):
-    """Convert float to string with no dot (e.g., 0.3 → 03)"""
-    return str(x).replace(".", "")
+    """Convert float to 2-digit string with no dot (e.g., 0.3 → '030', 1.25 → '125')"""
+    return f"{x:.2f}".replace(".", "")
 
 def generate_superquadric(e1, e2, index):
     """Generate a superquadric OBJ and MTL pair with red color"""

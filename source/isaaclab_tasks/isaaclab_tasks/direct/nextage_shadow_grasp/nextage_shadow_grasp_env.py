@@ -342,7 +342,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.scene.articulations["robot"] = self._robot
         self.scene.rigid_objects["table"] = self._table
         self.scene.rigid_objects["obj"] = self._obj
-        # 'rigid_object_collections'
         self.scene.sensors["contact_sensor"] = self._contact_sensor
 
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
@@ -358,8 +357,11 @@ class NextageShadowGraspEnv(DirectRLEnv):
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
-    # pre-physics step calls
+        stage = get_current_stage()
+        self._sq_params = self._infer_sq_params(stage)
+        self._obj_scales = self._get_obj_scale(stage)
 
+    # pre-physics step calls
     def _pre_physics_step(self, actions: torch.Tensor):
         # Clone and store the original actions
         self.actions = actions.clone()
@@ -483,8 +485,11 @@ class NextageShadowGraspEnv(DirectRLEnv):
         # Get environment origins for the selected envs
         env_origins = self.scene.env_origins[env_ids]
 
+        self._obj_scales[env_ids] = self._get_obj_scale(get_current_stage(), env_ids=env_ids)
+
         # Local obj offset within each env with more randomization
-        obj_offset = torch.tensor([0.0, 0.0, self.cfg.obj_size_half[-1] + self.cfg.table_height], device=self.device)
+        obj_offset = torch.zeros((len(env_ids), 3), device=self.device)
+        obj_offset[:, 2] = self._obj_scales[env_ids, 2] + self.cfg.table_height
 
         # Add random variance to the obj's position with increased randomness
         num_envs_to_reset = len(env_ids) if env_ids is not None else self.num_envs
@@ -509,7 +514,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
         joint_vel = torch.zeros_like(joint_pos)
         self._robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
 
-        ref_target_pos = obj_pos + torch.tensor([0.0, 0.0, self.cfg.obj_size_half[-1] - 0.03], device=self.device)[None]
+        ref_target_pos = obj_pos.clone()
+        ref_target_pos[:, 2] = ref_target_pos[:, 2] + self._obj_scales[env_ids, 2] - 0.03
         cwp_config = {
             "num_envs": num_envs_to_reset,
             "grasp_cweb0_position": ref_target_pos,
@@ -611,7 +617,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         ang_vel = torch.norm(self.hand2obj["ang_vel"], dim=-1)
         vel_penalty = - (vel * self.cfg.vel_penalty_scale + ang_vel * self.cfg.angvel_penalty_scale)
 
-        obj_z_pos_reward = torch.clamp(self.obj_pos[:, 2] - self.cfg.obj_size_half[-1], min=0.0) * self.cfg.z_pos_reward_scale
+        obj_z_pos_reward = torch.clamp(self.obj_pos[:, 2] - self._obj_scales[:, 2], min=0.0) * self.cfg.z_pos_reward_scale
 
         # contact forces
         is_contact = torch.max(torch.norm(self.net_contact_forces, dim=-1), dim=1)[0] > 1.0
@@ -656,3 +662,56 @@ class NextageShadowGraspEnv(DirectRLEnv):
             orientations = torch.tensor([[1, 0, 0, 0]], device=self.device).repeat(len(env_ids), 1)
             marker_indices = torch.zeros(len(env_ids), dtype=torch.int64, device=self.device)
             self.markers.visualize(positions, orientations, marker_indices=marker_indices)
+
+    def _infer_sq_params(self, stage):
+        import re
+
+        # Extract e1 and e2 values from the USD file path
+        # Example path: '.../sq_005_e1_03_e2_07.usd'
+        def extract_e1_e2_from_path(path: str) -> tuple[float, float]:
+            """Extract e1 and e2 values from a USD file path like '.../sq_005_e1_03_e2_07.usd'"""
+            match = re.search(r"e1_(\d+)_e2_(\d+)", path)
+            if not match:
+                raise ValueError(f"Could not extract e1/e2 from path: {path}")
+            e1 = float(match.group(1)) / 10  # "03" → 0.3
+            e2 = float(match.group(2)) / 10
+            return e1, e2
+
+        sq_params = []
+        for i in range(self.num_envs):
+            prim_path = f"/World/envs/env_{i}/obj"
+            prim = stage.GetPrimAtPath(prim_path)
+            if not prim.IsValid():
+                print(f"[{i}] Not Found")
+                continue
+            ref_meta = prim.GetMetadata("references")
+            ref_path = ref_meta.GetAddedOrExplicitItems()[0].assetPath
+            e1, e2 = extract_e1_e2_from_path(ref_path)
+            sq_params.append([e1, e2])
+
+        # Convert to tensor
+        sq_params = torch.tensor(sq_params, device=self.device)
+        return sq_params
+
+
+    def _get_obj_scale(self, stage, env_ids: torch.Tensor | None = None):
+        """Return the size of the prims in the USD stage."""
+        from collections import defaultdict
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
+
+        scales = []
+        for i in env_ids:
+            # Get the prim at the specified path
+            # Example path: "/World/envs/env_0/obj"
+            # Note: The path may vary based on your USD structure
+            prim_path = f"/World/envs/env_{i}/obj"
+            prim = stage.GetPrimAtPath(prim_path)
+            xform = UsdGeom.Xformable(prim)
+            for op in xform.GetOrderedXformOps():
+                if op.GetOpType() == UsdGeom.XformOp.TypeScale:
+                    scale = op.Get()
+                    break
+            scales.append([scale[0], scale[1], scale[2]])
+        scales = torch.tensor(scales, device=self.device)
+        return scales
