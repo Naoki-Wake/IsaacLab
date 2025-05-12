@@ -5,7 +5,7 @@ import numpy as np
 import torch
 # import transformations
 
-from isaaclab_tasks.utils.math import quat_slerp_batch
+from isaaclab_tasks.utils._math import quat_slerp_batch
 from isaaclab_tasks.utils.third_party.tf import transformations
 from isaaclab_tasks.utils.third_party.urdf_parser_py.urdf import URDF
 import isaaclab_tasks.utils.fk_using_urdf as urdf_fk

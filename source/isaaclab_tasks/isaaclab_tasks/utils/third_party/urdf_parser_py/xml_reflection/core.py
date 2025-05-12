@@ -1,10 +1,10 @@
 import sys
 import copy
 
-from urdf_parser_py.xml_reflection.basics import node_add
-from urdf_parser_py.xml_reflection.basics import xml_children
-from urdf_parser_py.xml_reflection.basics import xml_string
-from urdf_parser_py.xml_reflection.basics import YamlReflection
+from isaaclab_tasks.utils.third_party.urdf_parser_py.xml_reflection.basics import node_add
+from isaaclab_tasks.utils.third_party.urdf_parser_py.xml_reflection.basics import xml_children
+from isaaclab_tasks.utils.third_party.urdf_parser_py.xml_reflection.basics import xml_string
+from isaaclab_tasks.utils.third_party.urdf_parser_py.xml_reflection.basics import YamlReflection
 from xml.etree import ElementTree as ET
 
 # @todo Make this work with decorators
@@ -29,7 +29,7 @@ def reflect(cls, *args, **kwargs):
 # How to incorporate line number and all that jazz?
 def on_error_stderr(message):
     """ What to do on an error. This can be changed to raise an exception. """
-    pass
+    sys.stderr.write('')
     # sys.stderr.write(message + '\n')
 on_error = on_error_stderr
 
@@ -542,11 +542,9 @@ class Reflection(object):
 
         if is_final:
             for xml_var in info.attributes:
-                pass
-                # on_error('Unknown attribute "{}" in {}'.format(xml_var, path))
+                on_error('Unknown attribute "{}" in {}'.format(xml_var, path))
             for node in info.children:
-                pass
-                # on_error('Unknown tag "{}" in {}'.format(node.tag, path))
+                on_error('Unknown tag "{}" in {}'.format(node.tag, path))
         # Allow children parsers to adopt this current path (if modified with id_var)
         return path
 
