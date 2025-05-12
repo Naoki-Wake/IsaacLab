@@ -39,7 +39,7 @@ params:
   load_path: '' # path to the checkpoint to load
 
   config:
-    name: franka_shadow_pickup_direct
+    name: nextage_shadow_grasp_direct
     env_name: rlgpu
     device: 'cuda:0'
     device_name: 'cuda:0'
@@ -67,7 +67,7 @@ params:
     truncate_grads: True
     e_clip: 0.2
     horizon_length: 16
-    minibatch_size: 8192
+    minibatch_size: 2
     mini_epochs: 8
     critic_coef: 4
     clip_value: True
