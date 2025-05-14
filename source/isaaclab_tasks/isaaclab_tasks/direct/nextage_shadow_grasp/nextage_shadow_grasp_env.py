@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from __future__ import annotations
-from set_debugger import set_debugger; set_debugger()
 import torch
 import numpy as np
 import math
@@ -44,6 +43,7 @@ import os
 torch.autograd.set_detect_anomaly(True)
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 os.environ["TORCH_USE_CUDA_DSA"] = "1"
+ISAAC_ROOT_DIR = "/home/nawake/IsaacLab"
 
 @configclass
 class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
@@ -84,13 +84,13 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     )
 
     # scene
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1024, env_spacing=3.0, replicate_physics=False)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=3.0, replicate_physics=False)
 
     # robot
     robot = ArticulationCfg(
         prim_path="/World/envs/env_.*/Robot",
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"scripts/my_models/nextage/nextage_env_full_links.usd",
+            usd_path=f"{ISAAC_ROOT_DIR}/scripts/my_models/nextage/nextage_env_full_links.usd",
             activate_contact_sensors=True,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 disable_gravity=False,
@@ -237,6 +237,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
     def __init__(self, cfg: NextageShadowGraspEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
+        print("####################num_envs###############", self.num_envs)
 
         def get_env_local_pose(env_pos: torch.Tensor, xformable: UsdGeom.Xformable, device: torch.device):
             """Compute pose in env-local coordinates"""
@@ -317,6 +318,13 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.hand_full_indices = self._find_all_indices(self.cfg.shadow_hand_util.hand_full_joint_names, mode="joint")
         self.reference_traj_info = ReferenceTrajInfo(self.num_envs, self.device)
 
+        # add variables for Eureka reference
+        self.is_grasped_buf = torch.zeros(self.num_envs,
+                                           dtype=torch.bool,
+                                           device=self.device)
+        self.relation_between_obj_and_hand = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
     def _find_all_indices(self, joint_names, mode="link"):
         """Find all indices of joints matching the given names."""
         all_indices = []
@@ -498,6 +506,15 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         # Add some random rotation to the obj
         obj_rot_base = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(num_envs_to_reset, 1)
+        # obj_rot_base = torch.tensor([0.0, 0.0, 0.707, 0.707], device=self.device).repeat(num_envs_to_reset, 1)
+        # obj_rot_base = torch.tensor([0.707, 0.707, 0.0, 0.0], device=self.device).repeat(num_envs_to_reset, 1)
+        # Add random rotation around vertical axis
+        # rot_angle = (torch.rand(num_envs_to_reset, device=self.device) * 2 - 1) * 0.05  # Rotation of ±0.05 radians
+        # cos_half = torch.cos(rot_angle/2)
+        # sin_half = torch.sin(rot_angle/2)
+        # rot_quat = torch.stack([cos_half, torch.zeros_like(rot_angle), torch.zeros_like(rot_angle), sin_half], dim=1)
+        # Apply the rotation (simple version without full quaternion multiplication)
+        # obj_rot = obj_rot_base
         obj_vel = torch.zeros((num_envs_to_reset, 6), device=self.device)
 
         # Write to sim
@@ -601,7 +618,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         # Contact
         self.net_contact_forces = self._contact_sensor.data.net_forces_w_history[:, :, self.force_tip_link_indices]
-
+        
     def _get_rewards(self) -> torch.Tensor:
         # Refresh the intermediate values after the physics steps
         self._compute_intermediate_values()
@@ -625,6 +642,10 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         # grasp is success if the object is not moving with respect to the hand in the process of picking
         is_grasped = torch.logical_and(vel < 0.1, self.reference_traj_info.pick_flg)
+
+        self.is_grasped_buf[:] = is_grasped
+        self.relation_between_obj_and_hand[:] = torch.norm(self.hand2obj["pos"], dim=-1)
+
         grasp_success_bonus = torch.where(
             is_grasped,
             torch.ones_like(dist_reward) * self.cfg.grasp_reward_scale,
