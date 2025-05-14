@@ -112,7 +112,6 @@ class ShadowHandUtils:
         ]
         self.urdf_path = os.path.join(THIS_DIR, "urdf", "shadowhand_lite.urdf")
 
-
         if self.grasp_type == "active":
             self.position_tip_links = ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal"]
             self.force_tip_links = ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal"]
@@ -223,13 +222,6 @@ class ShadowHandUtils:
         for i in range(_n_envs):
             # get the contact web position and orientation
             _config = _get_single_config(config, i)
-            # _config = {
-            #     "grasp_cweb0_position": config["grasp_cweb0_position"][i].cpu().numpy(),
-            #     "grasp_cweb0_orientation": config["grasp_cweb0_orientation"][i].cpu().numpy(),
-            #     "grasp_approach_vertical": config["grasp_approach_vertical"][i],
-            #     "grasp_approach_horizontal": config["grasp_approach_horizontal"][i],
-            #     "back": config["back"][i]
-            # }
             _ref_traj_config = self._handConfigurationFromContactWeb(_config)
             ref_traj_config.append(_ref_traj_config)
 
@@ -253,16 +245,6 @@ class ShadowHandUtils:
         ref_traj_config = _list_dict2dict_tensor(ref_traj_config, dtype=torch.float32, device=device)
         ref_traj_config["hand_preshape_joint"] = self.couplingRuleTensor(ref_traj_config["hand_preshape_joint"])
         ref_traj_config["hand_shape_joint"] = self.couplingRuleTensor(ref_traj_config["hand_shape_joint"])
-
-        # Convert to tensor
-        # ref_traj_config = {
-        #     "handP_pybworld": torch.tensor(np.stack([_ref_traj_config["handP_pybworld"] for _ref_traj_config in ref_traj_config], axis=0), device=device),
-        #     "handQ_pybworld": torch.tensor(np.stack([_ref_traj_config["handQ_pybworld"] for _ref_traj_config in ref_traj_config], axis=0), device=device),
-        #     "handP_pybworld_pre": torch.tensor(np.stack([_ref_traj_config["handP_pybworld_pre"] for _ref_traj_config in ref_traj_config], axis=0), device=device),
-        #     "handQ_pybworld_pre": torch.tensor(np.stack([_ref_traj_config["handQ_pybworld_pre"] for _ref_traj_config in ref_traj_config], axis=0), device=device),
-        #     "hand_preshape_joint": self.couplingRuleTensor(torch.tensor([_ref_traj_config["hand_preshape_joint"] for _ref_traj_config in ref_traj_config], device=device)),
-        #     "hand_shape_joint": self.couplingRuleTensor(torch.tensor([_ref_traj_config["hand_shape_joint"] for _ref_traj_config in ref_traj_config], device=device)),
-        # }
         return ref_traj_config
 
     def _handConfigurationFromContactWeb(self, config):
@@ -316,14 +298,10 @@ class ShadowHandUtils:
         handP_pybworld_pre = np.array(uround(handP_pybworld)) + config["back"] / np.linalg.norm(vd) * vd
 
         return {
-            # "vd": vd,
-            # "vd_theta": vd_theta,
-            # "vd_phi": vd_phi,
             "handP_pybworld": handP_pybworld,
             "handQ_pybworld": _xyzw2wxyz(handQ_pybworld),
             "handP_pybworld_pre": handP_pybworld_pre,
             "handQ_pybworld_pre": _xyzw2wxyz(handQ_pybworld_pre),
-            # "back": config["back"],
             "hand_preshape_joint": self.preshape_joint,
             "hand_shape_joint": self.shape_joint,
         }
