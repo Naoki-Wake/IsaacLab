@@ -66,7 +66,7 @@ agent:
   time_limit_bootstrap: False
   # logging and checkpoint
   experiment:
-    directory: "name: nextage_shadow_grasp_direct"
+    directory: "nextage_shadow_grasp_direct"
     experiment_name: ""
     write_interval: 1000
     checkpoint_interval: 1000
