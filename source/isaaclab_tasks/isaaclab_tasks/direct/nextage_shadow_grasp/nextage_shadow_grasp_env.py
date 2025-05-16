@@ -38,6 +38,7 @@ from isaaclab_tasks.utils.hand_utils import ShadowHandUtils, ReferenceTrajInfo
 from isaaclab_tasks.utils.compute_relative_state import compute_object_state_in_hand_frame
 from isaaclab_tasks.utils.gpt_video_checker_buffer import ask_gpt
 from .events import EventCfg, create_grasp_event_cfg
+from .robot_cfg import RobotCfg
 from isaaclab.sensors import CameraCfg, Camera
 from isaaclab.sensors import TiledCamera, TiledCameraCfg, save_images_to_file
 import cv2                                            # OpenCV-Python
@@ -68,12 +69,10 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
 
     # obj parameters
     # obj_half_size = 0.03  # Half size of the obj in meters
-    obj_size_half = (0.025, 0.07, 0.06)  # Size of the cuboid obj in meters
+    obj_size_half = (0.035, 0.08, 0.08)  # Size of the cuboid obj in meters
    # exploration parameters
     exploration_noise = 0.2  # Noise level for actions to encourage exploration
     joint_reset_noise = 0.1  # Randomization amount for joint positions at reset
-    randomized_targets = True  # Whether to use randomized targets
-    target_switch_prob = 0.01  # Probability of switching to a new random target during an episode
 
     # Memory optimization parameters
     max_envs_per_batch = 8192  # Maximum environments to process in a single batch
@@ -95,58 +94,65 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
         ),
     )
 
+    # robot
+    robot_name = "shadow"  # "nextage-shadow" or "shadow"
+    env_spacing = 1.5 if robot_name == "shadow" else 3.0
     # scene
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=3.0, replicate_physics=False)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1024, env_spacing=env_spacing, replicate_physics=False)
+
+    robot_cfg = RobotCfg(robot_name)
+    robot = robot_cfg.get_articulation_cfg()
 
     # robot
-    robot = ArticulationCfg(
-        prim_path="/World/envs/env_.*/Robot",
-        spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{ISAAC_ROOT_DIR}/scripts/my_models/nextage/nextage_env_full_links.usd",
-            activate_contact_sensors=True,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                disable_gravity=False,
-                max_depenetration_velocity=1000,
-            ),
-            articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-                enabled_self_collisions=False, solver_position_iteration_count=12, solver_velocity_iteration_count=1
-            ),
-        ),
-        init_state=ArticulationCfg.InitialStateCfg(
-            joint_pos={
-                "CHEST_JOINT0": 0.0, "HEAD_JOINT0": 0.0, "HEAD_JOINT1": 0.32,
-                "LARM_JOINT0": 0.8, "LARM_JOINT1": 0.0, "LARM_JOINT2": 0.0, "LARM_JOINT3": 0.0, "LARM_JOINT4": 0.0, "LARM_JOINT5": 0.0,
-                "lh_FFJ4": 0.0, "lh_FFJ3": 0.0, "lh_FFJ2": 0.0,
-                "lh_FFJ1": 0.0, "lh_MFJ4": 0.0, "lh_MFJ3": 0.0, "lh_MFJ2": 0.0, "lh_MFJ1": 0.0, "lh_RFJ4": 0.0, "lh_RFJ3": 0.0, "lh_RFJ2": 0.0, "lh_RFJ1": 0.0, "lh_THJ5": 0.0, "lh_THJ4": 0.0, "lh_THJ2": 0.0, "lh_THJ1": 0.0, "RARM_JOINT0": 0.0, "RARM_JOINT1": -0.6, "RARM_JOINT2": -0.6, "RARM_JOINT3": 0.0, "RARM_JOINT4": 0.0, "RARM_JOINT5": 0.0,
-                "rh_FFJ4": 0.0, "rh_FFJ3": 0.0, "rh_FFJ2": 0.0, "rh_FFJ1": 0.0, "rh_MFJ4": 0.0, "rh_MFJ3": 0.0, "rh_MFJ2": 0.0, "rh_MFJ1": 0.0, "rh_RFJ4": 0.0, "rh_RFJ3": 0.0, "rh_RFJ2": 0.0, "rh_RFJ1": 0.0, "rh_THJ5": 0.0, "rh_THJ4": 0.0, "rh_THJ2": 0.0, "rh_THJ1": 0.0,
-            },
-            pos=(-0.65, 0.3, 0.8),
-            rot=(1.0, 0.0, 0.0, 0.0),
-        ),
-        actuators={
-            "right_arm": ImplicitActuatorCfg(
-                joint_names_expr=["RARM_JOINT[0-5]"],
-                effort_limit=1e6,         # Allows very high effort
-                velocity_limit=1e6,       # Allows very high velocity
-                stiffness=1e6,            # Allows very high stiffness
-                damping=1e3,              # Enough damping to prevent oscillations
-            ),
-            "right_hand": ImplicitActuatorCfg(
-                joint_names_expr=["rh_.*"],
-                effort_limit=1e6,         # Allows very high effort
-                velocity_limit=1e6,       # Allows very high velocity
-                stiffness=1e6,            # Allows very high stiffness
-                damping=1e3,              # Enough damping to prevent oscillations
-            ),
-            "head": ImplicitActuatorCfg(
-                joint_names_expr=["HEAD_JOINT[01]"],   # match both DoFs
-                effort_limit=200,            # sane torque
-                velocity_limit=10,
-                stiffness=50,                # PD gains; tune to taste
-                damping=5,
-            ),
-        },
-    )
+    #robot = ArticulationCfg(
+    #    prim_path="/World/envs/env_.*/Robot",
+    #    spawn=sim_utils.UsdFileCfg(
+    #        usd_path=f"{ISAAC_ROOT_DIR}/scripts/my_models/nextage/nextage_env_full_links.usd",
+    #        activate_contact_sensors=True,
+    #        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+    #            disable_gravity=False,
+    #            max_depenetration_velocity=1000,
+    #        ),
+    #        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+    #            enabled_self_collisions=False, solver_position_iteration_count=12, solver_velocity_iteration_count=1
+    #        ),
+    #    ),
+    #    init_state=ArticulationCfg.InitialStateCfg(
+    #        joint_pos={
+    #            "CHEST_JOINT0": 0.0, "HEAD_JOINT0": 0.0, "HEAD_JOINT1": 0.32,
+    #            "LARM_JOINT0": 0.8, "LARM_JOINT1": 0.0, "LARM_JOINT2": 0.0, "LARM_JOINT3": 0.0, "LARM_JOINT4": 0.0, "LARM_JOINT5": 0.0,
+    #            "lh_FFJ4": 0.0, "lh_FFJ3": 0.0, "lh_FFJ2": 0.0,
+    #            "lh_FFJ1": 0.0, "lh_MFJ4": 0.0, "lh_MFJ3": 0.0, "lh_MFJ2": 0.0, "lh_MFJ1": 0.0, "lh_RFJ4": 0.0, "lh_RFJ3": 0.0, "lh_RFJ2": 0.0, "lh_RFJ1": 0.0, "lh_THJ5": 0.0, "lh_THJ4": 0.0, "lh_THJ2": 0.0, "lh_THJ1": 0.0, "RARM_JOINT0": 0.0, "RARM_JOINT1": -0.6, "RARM_JOINT2": -0.6, "RARM_JOINT3": 0.0, "RARM_JOINT4": 0.0, "RARM_JOINT5": 0.0,
+    #            "rh_FFJ4": 0.0, "rh_FFJ3": 0.0, "rh_FFJ2": 0.0, "rh_FFJ1": 0.0, "rh_MFJ4": 0.0, "rh_MFJ3": 0.0, "rh_MFJ2": 0.0, "rh_MFJ1": 0.0, "rh_RFJ4": 0.0, "rh_RFJ3": 0.0, "rh_RFJ2": 0.0, "rh_RFJ1": 0.0, "rh_THJ5": 0.0, "rh_THJ4": 0.0, "rh_THJ2": 0.0, "rh_THJ1": 0.0,
+    #        },
+    #        pos=(-0.65, 0.3, 0.8),
+    #        rot=(1.0, 0.0, 0.0, 0.0),
+    #    ),
+    #    actuators={
+    #        "right_arm": ImplicitActuatorCfg(
+    #            joint_names_expr=["RARM_JOINT[0-5]"],
+    #            effort_limit=1e6,         # Allows very high effort
+    #            velocity_limit=1e6,       # Allows very high velocity
+    #            stiffness=1e6,            # Allows very high stiffness
+    #            damping=1e3,              # Enough damping to prevent oscillations
+    #        ),
+    #        "right_hand": ImplicitActuatorCfg(
+    #            joint_names_expr=["rh_.*"],
+    #            effort_limit=1e6,         # Allows very high effort
+    #            velocity_limit=1e6,       # Allows very high velocity
+    #            stiffness=1e6,            # Allows very high stiffness
+    #            damping=1e3,              # Enough damping to prevent oscillations
+    #        ),
+    #        "head": ImplicitActuatorCfg(
+    #            joint_names_expr=["HEAD_JOINT[01]"],   # match both DoFs
+    #            effort_limit=200,            # sane torque
+    #            velocity_limit=10,
+    #            stiffness=50,                # PD gains; tune to taste
+    #            damping=5,
+    #        ),
+    #    },
+    #)
+
     contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*", history_length=1, update_period=0.005, track_air_time=True
     )
@@ -245,7 +251,7 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
         prim_path="/World/Visuals/Markers",
         markers={
             "target_sphere": sim_utils.SphereCfg(
-                radius=0.000000001,
+                radius=0.02,
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0)),
             ),
         }
@@ -305,15 +311,12 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.robot_dof_lower_limits = self._robot.data.soft_joint_pos_limits[0, :, 0].to(device=self.device)
         self.robot_dof_upper_limits = self._robot.data.soft_joint_pos_limits[0, :, 1].to(device=self.device)
 
-        #
         self.action_scale = torch.tensor(self.cfg.action_scale, device=self.device)
         self.robot_dof_speed_scales = torch.ones_like(self.robot_dof_lower_limits)
         self.robot_dof_targets = torch.zeros((self.num_envs, self._robot.num_joints), device=self.device)
 
         stage = get_current_stage()
-
         self.eef_link_idx = self._robot.find_bodies(self.cfg.shadow_hand_util.ik_target_link)[0][0]
-        self.hand_link_idx = self._robot.find_bodies("rh_thbase")[0][0]
         self.position_tip_link_indices = self._find_all_indices(
             self.cfg.shadow_hand_util.position_tip_links, mode="link"
         )
@@ -331,6 +334,9 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         # Track initial obj positions
         self.obj_initial_pos = torch.zeros((self.num_envs, 3), device=self.device)
+
+        self.ref_target_pos = torch.zeros((self.num_envs, 3), device=self.device)
+        self.ref_finger_offset = torch.zeros((self.num_envs, len(self.cfg.shadow_hand_util.position_tip_links), 3), device=self.device)
 
         # Initialize environment-specific buffers
         if self.cfg.use_memory_efficient_mode:
@@ -354,11 +360,10 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.shape_joint = torch.tensor(self.cfg.shadow_hand_util.shape_joint, device=self.device)
         self.preshape_joint = torch.tensor(self.cfg.shadow_hand_util.preshape_joint, device=self.device)
 
-        # ── Right-arm DOF indices (6) ──────────────────────────────────────────
-        self.arm_indices = torch.tensor(
-            self._robot.find_joints("RARM_JOINT[0-5]")[0], device=self.device
-        )
-        # ── Right-hand DOF indices (16) ───────────────────────────────────────
+        # ── Right-arm DOF indices ──────────────────────────────────────────
+        self.arm_indices = self._find_all_indices(self.cfg.robot_cfg.arm_names, mode="joint")
+
+        # ── Right-hand DOF indices ───────────────────────────────────────
         self.hand_full_indices = self._find_all_indices(self.cfg.shadow_hand_util.hand_full_joint_names, mode="joint")
         self.reference_traj_info = ReferenceTrajInfo(self.num_envs, self.device)
 
@@ -497,6 +502,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self._sq_params = self._infer_sq_params(stage)
         self._obj_scales = self._get_obj_scale(stage)
 
+        self.hand_only_sim = self.cfg.robot_name == "shadow"
+
     # pre-physics step calls
     def _pre_physics_step(self, actions: torch.Tensor):
         # Clone and store the original actions
@@ -530,6 +537,15 @@ class NextageShadowGraspEnv(DirectRLEnv):
             self._process_batch_actions(slice(0, self.num_envs))
 
     def _solve_ik(self, env_ids, ik_target_pos, ik_target_rot):
+        if self.hand_only_sim:
+            return self._solve_ik_(env_ids, ik_target_pos, ik_target_rot)
+            # # TODO simple IK solver for the base joint
+            # return self._solve_base_joint(env_ids, ik_target_pos, ik_target_rot)
+        else:
+            return self._solve_ik_(env_ids, ik_target_pos, ik_target_rot)
+
+
+    def _solve_ik_(self, env_ids, ik_target_pos, ik_target_rot):
         # Create controller
         # convert to tensor indices if type is slice
         if isinstance(env_ids, slice):
@@ -538,9 +554,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
         diff_ik_controller = DifferentialIKController(diff_ik_cfg, num_envs=len(env_ids), device=self.device)
         # reset controller
         diff_ik_controller.reset()
-        robot_entity_cfg = SceneEntityCfg("robot", joint_names=["RARM_JOINT[0-5]"], body_names=[self.cfg.shadow_hand_util.ik_target_link])
-        # body_names=["RARM_JOINT5_Link"])
-        #)
+        robot_entity_cfg = SceneEntityCfg("robot", joint_names=self.cfg.robot_cfg.arm_names,  body_names=[self.cfg.shadow_hand_util.ik_target_link])
+
         # Resolving the scene entities
         robot_entity_cfg.resolve(self.scene)
 
@@ -564,7 +579,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         # print("target_pos_b", target_pos_b, "target_rot_b", target_rot_b, "ee_pos_b", ee_pos_b, "ee_quat_b", ee_quat_b)
         arm_targets = diff_ik_controller.compute(ee_pos_b, ee_quat_b, jacobian, joint_pos)
         ik_fail = torch.norm(target_pos_b - ee_pos_b, p=2, dim=-1) > 0.05
-        # if ik_fail.any(): raise
+
         return arm_targets, ik_fail
 
     def _process_batch_actions(self, env_slice):
@@ -581,7 +596,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
         ik_target_pos = ik_target_pos + self.actions[env_slice, :3] * self.action_scale[None, :3]
         # ik_target_rot = self.actions[env_slice, 3:7] * self.cfg.action_scale
         arm_targets, self.ik_fail = self._solve_ik(env_slice, ik_target_pos, ik_target_rot)
-
         ### Fingers
         finger_targets = finger_targets + ~self.reference_traj_info.pick_flg[env_slice, None] * self.actions[env_slice, len(self.arm_indices):-1] * self.action_scale[None, len(self.arm_indices):-1]
 
@@ -656,20 +670,14 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self._obj.write_root_velocity_to_sim(obj_vel, env_ids=env_ids)
 
         joint_pos = self._robot.data.default_joint_pos[env_ids]
-        # + sample_uniform(
-        #     -self.cfg.joint_reset_noise,
-        #     self.cfg.joint_reset_noise,
-        #     (len(env_ids) if env_ids is not None else self.num_envs, self._robot.num_joints),
-        #     self.device,
-        # )
         joint_vel = torch.zeros_like(joint_pos)
         self._robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
 
-        ref_target_pos = obj_pos.clone()
-        ref_target_pos[:, 2] = ref_target_pos[:, 2] + self._obj_scales[env_ids, 2] - 0.03
+        self._compute_intermediate_values(env_ids)
+
         cwp_config = {
             "num_envs": num_envs_to_reset,
-            "grasp_cweb0_position": ref_target_pos,
+            "grasp_cweb0_position": self.ref_target_pos[env_ids],
             "grasp_cweb0_orientation": torch.tensor([1, 0, 0, 0], device=self.device).repeat(num_envs_to_reset, 1),
             "grasp_approach_vertical": np.random.uniform(70, 80, size=num_envs_to_reset).tolist(),
             "grasp_approach_horizontal": [0.0 for _ in range(num_envs_to_reset)],
@@ -678,6 +686,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.reference_traj_info.update(env_ids, **self.cfg.shadow_hand_util.getReferenceTrajInfo(cwp_config, self.device), reset=True)
         ik_target_pos, ik_target_rot, finger_targets = self.reference_traj_info.get(env_ids, torch.tensor([0.0] * num_envs_to_reset, device=self.device))
         arm_targets, ik_fail = self._solve_ik(env_ids, ik_target_pos, ik_target_rot)
+
         joint_pos[:, self.arm_indices] = arm_targets
         joint_pos = torch.clamp(joint_pos, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
         joint_vel = torch.zeros_like(joint_pos)
@@ -692,7 +701,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         # Refresh intermediate values for the specified environments
         self._compute_intermediate_values(env_ids)
-        self._visualize(env_ids)
+        self._visualize()
 
         # Set training flag for exploration
         self.is_training = True
@@ -708,6 +717,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
             / (self.robot_dof_upper_limits[self.hand_full_indices] - self.robot_dof_lower_limits[self.hand_full_indices])
             - 1.0
         )
+        finger_effort = self.robot_dof_targets[:, self.hand_full_indices] - self._robot.data.joint_pos[:, self.hand_full_indices]
         # to_target = self.obj_pos - self.robot_grasp_pos
 
         hand_pos, hand_rot = self._get_current_eef_pose()
@@ -717,6 +727,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
                 hand_pos,
                 hand_rot,
                 *diff_finger,
+                finger_effort,
                 self.obj_pos,
                 self.obj_rot,
             ),
@@ -734,12 +745,18 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.obj_pos[env_ids] = self._obj.data.root_pos_w[env_ids]
         self.obj_rot[env_ids] = self._obj.data.root_quat_w[env_ids]
 
+        self.ref_target_pos[env_ids] = self.obj_pos[env_ids]
+        self.ref_target_pos[env_ids, 2] += self._obj_scales[env_ids, 2] - 0.02
+
+        # simple x-axis translation
+        self.ref_finger_offset[env_ids, :, 0] = torch.tensor([ 1,  1,  1, -1], device='cuda:0').unsqueeze(0) *  self._obj_scales[env_ids, 0].unsqueeze(1)
+
         self.current_finger_pos = {
             k: self._robot.data.body_pos_w[:, link_idx] for k, link_idx in zip(self.cfg.shadow_hand_util.position_tip_links, self.position_tip_link_indices)
         }
 
         self.target_finger_pos = {
-            k: self.obj_pos for k in self.cfg.shadow_hand_util.position_tip_links
+            k: self.ref_target_pos + self.ref_finger_offset[:, i] for i, k in enumerate(self.cfg.shadow_hand_util.position_tip_links)
         }
 
         self.hand2obj = compute_object_state_in_hand_frame(
@@ -823,16 +840,61 @@ class NextageShadowGraspEnv(DirectRLEnv):
         }
         return rewards
 
-    def _visualize(self, env_ids: torch.Tensor | None = None):
-        for k in self.cfg.shadow_hand_util.position_tip_links:
-            # positions = self.current_finger_pos[k][env_ids]
-            # orientations = torch.tensor([[0, 0, 0, 1]], device=self.device).repeat(len(env_ids), 1)
-            # marker_indices = torch.zeros(len(env_ids), dtype=torch.int64, device=self.device)
-            # self.markers.visualize(positions, orientations, marker_indices)
+    def _solve_base_joint(self, env_ids, pos, rot_quat):
+        # pos: (..., 3)
+        # rot_quat: (..., 4) (w, x, y, z)
+        root_pose_w = self._robot.data.root_state_w[env_ids, :7]
+        target_pos_b, target_rot_b = subtract_frame_transforms(
+            root_pose_w[:, 0:3], root_pose_w[:, 3:7], pos, rot_quat
+        )
 
-            positions = self.target_finger_pos[k]
-            orientations = torch.tensor([[1, 0, 0, 0]], device=self.device).repeat(len(env_ids), 1)
-            marker_indices = torch.zeros(len(env_ids), dtype=torch.int64, device=self.device)
+        def quat_to_euler_zyx(quat):
+            # quat: shape (..., 4) in (w, x, y, z)
+            w, x, y, z = quat[..., 0], quat[..., 1], quat[..., 2], quat[..., 3]
+
+            sinr_cosp = 2 * (w * x + y * z)
+            cosr_cosp = 1 - 2 * (x * x + y * y)
+            roll = torch.atan2(sinr_cosp, cosr_cosp)
+
+            sinp = 2 * (w * y - z * x)
+            pitch = torch.where(
+                torch.abs(sinp) >= 1,
+                torch.sign(sinp) * (math.pi / 2),
+                torch.asin(sinp)
+            )
+
+            siny_cosp = 2 * (w * z + x * y)
+            cosy_cosp = 1 - 2 * (y * y + z * z)
+            yaw = torch.atan2(siny_cosp, cosy_cosp)
+
+            return torch.stack([roll, pitch, yaw], dim=-1)  # shape (..., 3)
+
+        dof_pos = torch.zeros((pos.shape[0], 6), device=pos.device)
+        dof_pos[:, 0:3] = target_pos_b  # Tx, Ty, Tz
+        dof_pos[:, 3:6] = quat_to_euler_zyx(target_rot_b)  # roll, pitch, yaw
+        return dof_pos, None
+
+    def _visualize(self, env_ids: torch.Tensor | None = None):
+        if env_ids is None:
+            env_ids = self._robot._ALL_INDICES
+
+            all_positions = []
+            all_orientations = []
+            all_marker_indices = []
+
+            for cnt, k in enumerate(self.cfg.shadow_hand_util.position_tip_links):
+                pos = self.target_finger_pos[k][env_ids]  # (N, 3)
+                ori = torch.tensor([[1, 0, 0, 0]], device=self.device).repeat(len(env_ids), 1)  # (N, 4)
+                idx = torch.zeros(len(env_ids), dtype=torch.int64, device=self.device)  # (N,)
+
+                all_positions.append(pos)
+                all_orientations.append(ori)
+                all_marker_indices.append(idx)
+
+            # Concatenate
+            positions = torch.cat(all_positions, dim=0)
+            orientations = torch.cat(all_orientations, dim=0)
+            marker_indices = torch.cat(all_marker_indices, dim=0)
             self.markers.visualize(positions, orientations, marker_indices=marker_indices)
 
     def _infer_sq_params(self, stage):
