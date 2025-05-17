@@ -28,6 +28,7 @@ SEED_CFG = ArticulationCfg(
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=True,
             max_depenetration_velocity=5.0,
+            retain_accelerations=False,
         ),
         activate_contact_sensors=False,
     ),
@@ -46,8 +47,8 @@ SEED_CFG = ArticulationCfg(
             joint_names_expr=[".*"],
             velocity_limit=100.0,
             effort_limit=87.0,
-            stiffness=1000.0,
-            damping=100.0,
+            stiffness=10000.0,
+            damping=1000.0,
         ),
     },
 )
