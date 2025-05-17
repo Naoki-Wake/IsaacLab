@@ -163,7 +163,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         ee_jacobi_idx = robot_entity_cfg.body_ids[0]
     # Simulation loop
     while simulation_app.is_running():
-        if count % 150 == 0:
+        if count % 1000 == 0:
             scene.reset()
             robot.reset()
             # Reset

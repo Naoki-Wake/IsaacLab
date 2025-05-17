@@ -24,21 +24,21 @@ from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
 
 SEED_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"/workspace/isaaclab/scripts/my_models/seed_r7_description/noid_mercury/noid_mercury.usd",
+        usd_path=f"/home/nawake/IsaacLab/scripts/my_models/seed_r7_description/noid_mercury/noid_mercury.usd",
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
-            disable_gravity=False,
+            disable_gravity=True,
             max_depenetration_velocity=5.0,
         ),
         activate_contact_sensors=False,
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         joint_pos={
-            "l_shoulder_p_joint": 0.0,  # 以前の "shoulder_pan_joint"
-            "l_shoulder_r_joint": 0.0,  # 以前の "shoulder_lift_joint"
-            "l_elbow_joint": 0.0,  # 以前の "elbow_joint"
-            "l_wrist_y_joint": 0.0,  # 以前の "wrist_1_joint"
-            "l_wrist_p_joint": 0.0,  # 以前の "wrist_2_joint"
-            "l_wrist_r_joint": 0.0,  # 以前の "wrist_3_joint"
+            "l_shoulder_p_joint": 0.0,
+            "l_shoulder_r_joint": 0.0,
+            "l_elbow_joint": 0.0,
+            "l_wrist_y_joint": 0.0,
+            "l_wrist_p_joint": 0.0,
+            "l_wrist_r_joint": 0.0,
         },
     ),
     actuators={
@@ -46,8 +46,8 @@ SEED_CFG = ArticulationCfg(
             joint_names_expr=[".*"],
             velocity_limit=100.0,
             effort_limit=87.0,
-            stiffness=800.0,
-            damping=40.0,
+            stiffness=1000.0,
+            damping=100.0,
         ),
     },
 )
