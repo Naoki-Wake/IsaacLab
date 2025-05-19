@@ -11,8 +11,8 @@ from isaaclab.utils import configclass
 @configclass
 class NextageShadowGraspPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 16
-    max_iterations = 100000
-    save_interval = 500
+    max_iterations = 1000
+    save_interval = 100
     experiment_name = "nextage_shadow_grasp_direct"
     empirical_normalization = True
     policy = RslRlPpoActorCriticCfg(

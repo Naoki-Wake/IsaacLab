@@ -9,6 +9,7 @@ import torch
 import numpy as np
 import math
 import glob
+import shutil
 
 from isaacsim.core.utils.stage import get_current_stage
 from isaacsim.core.utils.torch.transformations import tf_combine, tf_inverse, tf_vector
@@ -46,7 +47,7 @@ fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
 import omni.usd
 import os
-
+use_camera = False
 torch.autograd.set_detect_anomaly(True)
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 os.environ["TORCH_USE_CUDA_DSA"] = "1"
@@ -64,7 +65,7 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     episode_length_s = 3
     decimation = 2
     action_space = 23 # 6 + 16 + 1
-    observation_space = 42
+    observation_space = 58#42
     state_space = 0
 
     # obj parameters
@@ -95,63 +96,14 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     )
 
     # robot
-    robot_name = "shadow"  # "nextage-shadow" or "shadow"
+    robot_name = "nextage-shadow"  # "nextage-shadow" or "shadow"
     env_spacing = 1.5 if robot_name == "shadow" else 3.0
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1024, env_spacing=env_spacing, replicate_physics=False)
 
     robot_cfg = RobotCfg(robot_name)
+    robot_cfg.init_joint_pos["HEAD_JOINT1"] = 0.32
     robot = robot_cfg.get_articulation_cfg()
-
-    # robot
-    #robot = ArticulationCfg(
-    #    prim_path="/World/envs/env_.*/Robot",
-    #    spawn=sim_utils.UsdFileCfg(
-    #        usd_path=f"{ISAAC_ROOT_DIR}/scripts/my_models/nextage/nextage_env_full_links.usd",
-    #        activate_contact_sensors=True,
-    #        rigid_props=sim_utils.RigidBodyPropertiesCfg(
-    #            disable_gravity=False,
-    #            max_depenetration_velocity=1000,
-    #        ),
-    #        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-    #            enabled_self_collisions=False, solver_position_iteration_count=12, solver_velocity_iteration_count=1
-    #        ),
-    #    ),
-    #    init_state=ArticulationCfg.InitialStateCfg(
-    #        joint_pos={
-    #            "CHEST_JOINT0": 0.0, "HEAD_JOINT0": 0.0, "HEAD_JOINT1": 0.32,
-    #            "LARM_JOINT0": 0.8, "LARM_JOINT1": 0.0, "LARM_JOINT2": 0.0, "LARM_JOINT3": 0.0, "LARM_JOINT4": 0.0, "LARM_JOINT5": 0.0,
-    #            "lh_FFJ4": 0.0, "lh_FFJ3": 0.0, "lh_FFJ2": 0.0,
-    #            "lh_FFJ1": 0.0, "lh_MFJ4": 0.0, "lh_MFJ3": 0.0, "lh_MFJ2": 0.0, "lh_MFJ1": 0.0, "lh_RFJ4": 0.0, "lh_RFJ3": 0.0, "lh_RFJ2": 0.0, "lh_RFJ1": 0.0, "lh_THJ5": 0.0, "lh_THJ4": 0.0, "lh_THJ2": 0.0, "lh_THJ1": 0.0, "RARM_JOINT0": 0.0, "RARM_JOINT1": -0.6, "RARM_JOINT2": -0.6, "RARM_JOINT3": 0.0, "RARM_JOINT4": 0.0, "RARM_JOINT5": 0.0,
-    #            "rh_FFJ4": 0.0, "rh_FFJ3": 0.0, "rh_FFJ2": 0.0, "rh_FFJ1": 0.0, "rh_MFJ4": 0.0, "rh_MFJ3": 0.0, "rh_MFJ2": 0.0, "rh_MFJ1": 0.0, "rh_RFJ4": 0.0, "rh_RFJ3": 0.0, "rh_RFJ2": 0.0, "rh_RFJ1": 0.0, "rh_THJ5": 0.0, "rh_THJ4": 0.0, "rh_THJ2": 0.0, "rh_THJ1": 0.0,
-    #        },
-    #        pos=(-0.65, 0.3, 0.8),
-    #        rot=(1.0, 0.0, 0.0, 0.0),
-    #    ),
-    #    actuators={
-    #        "right_arm": ImplicitActuatorCfg(
-    #            joint_names_expr=["RARM_JOINT[0-5]"],
-    #            effort_limit=1e6,         # Allows very high effort
-    #            velocity_limit=1e6,       # Allows very high velocity
-    #            stiffness=1e6,            # Allows very high stiffness
-    #            damping=1e3,              # Enough damping to prevent oscillations
-    #        ),
-    #        "right_hand": ImplicitActuatorCfg(
-    #            joint_names_expr=["rh_.*"],
-    #            effort_limit=1e6,         # Allows very high effort
-    #            velocity_limit=1e6,       # Allows very high velocity
-    #            stiffness=1e6,            # Allows very high stiffness
-    #            damping=1e3,              # Enough damping to prevent oscillations
-    #        ),
-    #        "head": ImplicitActuatorCfg(
-    #            joint_names_expr=["HEAD_JOINT[01]"],   # match both DoFs
-    #            effort_limit=200,            # sane torque
-    #            velocity_limit=10,
-    #            stiffness=50,                # PD gains; tune to taste
-    #            damping=5,
-    #        ),
-    #    },
-    #)
 
     contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*", history_length=1, update_period=0.005, track_air_time=True
@@ -180,35 +132,36 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     )
 
     # first person camera
-    camera = CameraCfg(
-        prim_path="/World/envs/env_.*/Robot/LEFT_CAMERA/front_cam",
-        update_period=0.1,
-        height=480,
-        width=640,
-        data_types=["rgb", "distance_to_image_plane"],
-        spawn=sim_utils.PinholeCameraCfg(
-            focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
-        ),
-        offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=(0.58965,0.39028,-0.39028,-0.58965), convention="opengl"),
-        #offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=quat_from_euler_xyz(torch.tensor(0.0), torch.deg2rad(torch.tensor(-67.0)), torch.tensor(-math.pi/2.0)), convention="opengl"),
-    )
-    #camera: TiledCameraCfg = TiledCameraCfg(
-    #    prim_path="/World/envs/env_.*/Robot/LEFT_CAMERA/front_cam",
-    #    offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=(0.58965,0.39028,-0.39028,-0.58965), convention="opengl"),
-    #    data_types=["rgb"],
-    #    spawn=sim_utils.PinholeCameraCfg(
-    #        focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
-    #    ),
-    #    width=640,
-    #    height=480,
-    #)
+    if use_camera:
+        camera = CameraCfg(
+            prim_path="/World/envs/env_.*/Robot/LEFT_CAMERA/front_cam",
+            update_period=0.1,
+            height=480,
+            width=640,
+            data_types=["rgb", "distance_to_image_plane"],
+            spawn=sim_utils.PinholeCameraCfg(
+                focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
+            ),
+            offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=(0.58965,0.39028,-0.39028,-0.58965), convention="opengl"),
+            #offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=quat_from_euler_xyz(torch.tensor(0.0), torch.deg2rad(torch.tensor(-67.0)), torch.tensor(-math.pi/2.0)), convention="opengl"),
+        )
+        #camera: TiledCameraCfg = TiledCameraCfg(
+        #    prim_path="/World/envs/env_.*/Robot/LEFT_CAMERA/front_cam",
+        #    offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=(0.58965,0.39028,-0.39028,-0.58965), convention="opengl"),
+        #    data_types=["rgb"],
+        #    spawn=sim_utils.PinholeCameraCfg(
+        #        focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
+        #    ),
+        #    width=640,
+        #    height=480,
+        #)
 
     events: EventCfg = create_grasp_event_cfg(base_obj_size=obj_size_half)
     obj = RigidObjectCfg(
         prim_path="/World/envs/env_.*/obj",
         spawn=sim_utils.MultiUsdFileCfg(
             usd_path=sorted(glob.glob(os.path.join("source/isaaclab_assets/data/Props/Superquadrics", "sq_*.usd"))),
-            scale=(0.1, 0.1, 0.1),
+            scale=(0.04, 0.04, 0.04),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 max_depenetration_velocity=1000,
                 disable_gravity=False,
@@ -249,6 +202,7 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     )
     marker = VisualizationMarkersCfg(
         prim_path="/World/Visuals/Markers",
+        #prim_path="/World/envs/env_.*/obj/Visuals/Markers",
         markers={
             "target_sphere": sim_utils.SphereCfg(
                 radius=0.02,
@@ -377,7 +331,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.frames      = [[] for _ in range(self.num_envs)]
         self.episode_ctr = torch.zeros(self.num_envs, dtype=torch.int32)
         self.champion_indices = torch.zeros(self.num_envs, dtype=torch.int32)
-
+        self.gpt_ctr = 0
 
     def _capture_frame(self):
         tex = self._camera.data.output["rgb"]          # (N,H,W,4) float32 [0,1]
@@ -409,16 +363,22 @@ class NextageShadowGraspEnv(DirectRLEnv):
                 creds_path="source/isaaclab_tasks/isaaclab_tasks/utils/auth.env",
                 num_frames=10,
             )
-            if winner_first:
+            self.gpt_ctr += 1
+            if winner_first: # candidate is better
+                print(f"Candidate video {candidate_path} is better than champion {champion_path}.")
                 # Archive the old champion
-                archive_index = len(glob.glob("videos/*_champion.mp4"))
+                existing = glob.glob("videos/*_champion.mp4")
+                indices = [int(os.path.basename(p).split("_")[0]) for p in existing if os.path.basename(p).split("_")[0].isdigit()]
+                archive_index = max(indices, default=-1) + 1
                 archived_path = f"videos/{archive_index}_champion.mp4"
-                os.rename(champion_path, archived_path)
+                shutil.move(champion_path, archived_path)
                 # log the reason for the decision with the archive
+                reason = reason + f" (GPTcount-{self.gpt_ctr})"
                 with open(f"videos/{archive_index}_reason.txt", "w") as f:
                     f.write(reason)
                 # Promote the candidate
-                os.rename(candidate_path, "videos/champion.mp4")
+                assert not os.path.exists(champion_path), f"Champion path {champion_path} already exists."
+                shutil.move(candidate_path, champion_path)
                 return True
             else:
                 # Discard the candidate
@@ -427,7 +387,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
                 return False
         else:
             # No existing champion: promote candidate directly but not reaward as champion
-            os.rename(candidate_path, champion_path)
+            shutil.move(candidate_path, champion_path)
             return False
         
 
@@ -477,14 +437,16 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self._robot = Articulation(self.cfg.robot)
         self._table = RigidObject(self.cfg.table)
         self._obj = RigidObject(self.cfg.obj)
-        self._camera = Camera(self.cfg.camera)
-        #self._camera = TiledCamera(self.cfg.camera)
+        if use_camera:
+            self._camera = Camera(self.cfg.camera)
+            #self._camera = TiledCamera(self.cfg.camera)
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
         self.scene.articulations["robot"] = self._robot
         self.scene.rigid_objects["table"] = self._table
         self.scene.rigid_objects["obj"] = self._obj
         self.scene.sensors["contact_sensor"] = self._contact_sensor
-        self.scene.sensors["camera"] = self._camera
+        if use_camera:
+            self.scene.sensors["camera"] = self._camera
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
         self._terrain = self.cfg.terrain.class_type(self.cfg.terrain)
@@ -630,8 +592,9 @@ class NextageShadowGraspEnv(DirectRLEnv):
         # if torch.any(out_of_bounds):
         #     print(f"obj(s) out of bounds horizontally! Max x-y displacement: {obj_horizontal_displacement.max().item():.3f}m")
         done_envs = torch.where(terminated | truncated)[0].tolist()
-        for env_id in done_envs:
-            self._write_video(env_id)
+        if use_camera:
+            for env_id in done_envs:
+                self._write_video(env_id)
         return terminated, truncated
 
     def _reset_idx(self, env_ids: torch.Tensor | None):
@@ -740,7 +703,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
             env_ids = self._robot._ALL_INDICES
 
         self._obj.update(self.dt)
-        self._camera.update(self.dt)
+        if use_camera:
+            self._camera.update(self.dt)
         # # Update only the specified environments
         self.obj_pos[env_ids] = self._obj.data.root_pos_w[env_ids]
         self.obj_rot[env_ids] = self._obj.data.root_quat_w[env_ids]
@@ -769,11 +733,11 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         # Contact
         self.net_contact_forces = self._contact_sensor.data.net_forces_w_history[:, :, self.force_tip_link_indices]
-        
-        rgb = self._camera.data.output["rgb"].cpu().numpy()      # (N, H, W, 4)
-        rgb = (rgb[..., :3]).astype(np.uint8)              # strip alpha
-        for i in range(self.num_envs):
-            self.frames[i].append(rgb[i])
+        if use_camera:
+            rgb = self._camera.data.output["rgb"].cpu().numpy()      # (N, H, W, 4)
+            rgb = (rgb[..., :3]).astype(np.uint8)              # strip alpha
+            for i in range(self.num_envs):
+                self.frames[i].append(rgb[i])
         # write a buffer to an image for debugging
         # print('new frame is added')
 
@@ -810,8 +774,9 @@ class NextageShadowGraspEnv(DirectRLEnv):
             torch.zeros_like(dist_reward)
         )
 
-        rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward
-
+        # rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward
+        rewards = dist_reward + vel_penalty + obj_z_pos_reward
+        rewards_wo_bonus = rewards.clone()
         # if self.champion_indices has an index of 1, give it a bonus
         if torch.any(self.champion_indices == 1):
             index_to_bonus = torch.where(self.champion_indices == 1)[0]
@@ -831,6 +796,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         self.extras["log"] = {
             "rewards": safe_mean(rewards),
+            "rewards_wo_bonus": safe_mean(rewards_wo_bonus),
             "dist_reward": safe_mean(dist_reward),
             "grasp_reward": safe_mean(grasp_success_bonus),
             "vel_penalty": safe_mean(vel_penalty),
