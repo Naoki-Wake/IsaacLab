@@ -13,7 +13,7 @@ class NextageCabinetPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 16
     max_iterations = 1500
     save_interval = 50
-    experiment_name = "franka_cabinet_direct"
+    experiment_name = "nextage_cabinet_direct"
     empirical_normalization = True
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
