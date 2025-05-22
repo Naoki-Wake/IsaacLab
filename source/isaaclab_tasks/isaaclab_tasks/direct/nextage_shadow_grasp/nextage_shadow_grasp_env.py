@@ -9,10 +9,10 @@ import torch
 import numpy as np
 import math
 import glob
-
+from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
 from isaacsim.core.utils.stage import get_current_stage
 from isaacsim.core.utils.torch.transformations import tf_combine, tf_inverse, tf_vector
-from pxr import UsdGeom
+from pxr import UsdGeom, Ar
 
 import isaaclab.sim as sim_utils
 from isaaclab.actuators.actuator_cfg import ImplicitActuatorCfg
@@ -34,7 +34,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.controllers import DifferentialIKController, DifferentialIKControllerCfg
 from isaaclab.utils.math import subtract_frame_transforms
 
-from isaaclab_tasks.utils.hand_utils import ShadowHandUtils, ReferenceTrajInfo
+from isaaclab_tasks.utils.hand_utils import ShadowHandUtils, HondaHandUtils, ReferenceTrajInfo
 from isaaclab_tasks.utils.compute_relative_state import compute_object_state_in_hand_frame
 from .events import EventCfg, create_grasp_event_cfg
 from .robot_cfg import RobotCfg
@@ -49,16 +49,17 @@ os.environ["TORCH_USE_CUDA_DSA"] = "1"
 @configclass
 class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     # env
+    is_training: bool = True
+
     episode_length_s = 3
-    decimation = 2
-    action_space = 23 # 6 + 16 + 1
-    observation_space = 42
+    decimation = 8
+    observation_space = 58
     state_space = 0
 
     # obj parameters
     # obj_half_size = 0.03  # Half size of the obj in meters
     obj_size_half = (0.035, 0.08, 0.08)  # Size of the cuboid obj in meters
-   # exploration parameters
+    # exploration parameters
     exploration_noise = 0.2  # Noise level for actions to encourage exploration
     joint_reset_noise = 0.1  # Randomization amount for joint positions at reset
 
@@ -70,7 +71,7 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
-        dt=1 / 120,
+        dt=1 / 60,
         render_interval=decimation,
         # disable_contact_processing=True,
         physics_material=sim_utils.RigidBodyMaterialCfg(
@@ -83,7 +84,13 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     )
 
     # robot
-    robot_name = "shadow"  # "nextage-shadow" or "shadow"
+    robot_name = "shadow" # or "nextage-shadow" or "shadow"
+    if "shadow" in robot_name: n_finger_joint = 16
+    elif "honda" in robot_name: n_finger_joint = 18
+    action_space = 6 + n_finger_joint + 1
+    # The code `contact_se` is not a valid Python code snippet. It seems to be incomplete or incorrect. If you provide
+    # more context or the full code snippet, I can help you understand what it is trying to do.
+    off_contact_sensor = robot_name == "ur10-honda"
     env_spacing = 1.5 if robot_name == "shadow" else 3.0
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1024, env_spacing=env_spacing, replicate_physics=False)
@@ -93,7 +100,8 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*", history_length=1, update_period=0.005, track_air_time=True
     )
-    shadow_hand_util = ShadowHandUtils(grasp_type="active")
+    grasp_type = "active"  # or "passive"
+    hand_util = ShadowHandUtils(grasp_type=grasp_type) if "shadow" in robot_name else HondaHandUtils(grasp_type=grasp_type)
     table_height = 0.8
     table_size = (0.8, 0.8, table_height)
     table = RigidObjectCfg(
@@ -116,11 +124,18 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
         )
     )
     events: EventCfg = create_grasp_event_cfg(base_obj_size=obj_size_half)
+    obj_asset_cfgs = [
+        sim_utils.UsdFileCfg(
+            usd_path=obj_usd_path, scale=(0.1, 0.1, 0.1),
+        )
+        for obj_usd_path in sorted(glob.glob(os.path.join("source/isaaclab_assets/data/Props/Superquadrics/*", "object.usd")))
+    ]
+
     obj = RigidObjectCfg(
-        prim_path="/World/envs/env_.*/obj",
-        spawn=sim_utils.MultiUsdFileCfg(
-            usd_path=sorted(glob.glob(os.path.join("source/isaaclab_assets/data/Props/Superquadrics", "sq_*.usd"))),
-            scale=(0.1, 0.1, 0.1),
+        prim_path="/World/envs/env_.*/Object",  # Must match env pattern
+        spawn=sim_utils.MultiAssetSpawnerCfg(
+            assets_cfg=obj_asset_cfgs,
+            random_choice=True,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 max_depenetration_velocity=1000,
                 disable_gravity=False,
@@ -133,15 +148,13 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
                 max_linear_velocity=100,
                 max_angular_velocity=100
             ),
-            # visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
-            random_choice=True,
             mass_props=sim_utils.MassPropertiesCfg(mass=0.1),
             collision_props=sim_utils.CollisionPropertiesCfg(
                 collision_enabled=True
             ),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.0, 0.0, table_height),
+            pos=(0.0, 0.0, table_height),  # Spawn above table/ground
             rot=(0.0, 0.0, 0.0, 1.0)
         )
     )
@@ -169,21 +182,23 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
         }
     )
     deg_to_rad = math.pi / 180
-    action_scale = [0.01, 0.01, 0.01] + [5.0 * deg_to_rad] * 3  + [5.0 * deg_to_rad] * 16 + [1.0]
+    # action_scale = [0.0 for _ in range(action_space)] # debug
+    action_scale = [0.01, 0.01, 0.01] + [5.0 * deg_to_rad] * 3  + [10.0 * deg_to_rad] * n_finger_joint + [1.0]
     dof_velocity_scale = 0.1
 
     # reward scales - improved for better lifting
-    dist_reward_scale = 2.0         # Increased focus on positioning
+    dist_reward_scale = 0.1         # Increased focus on positioning
     action_penalty_scale = 0.05
-    grasp_reward_scale = 20.0       # Increased reward for proper grasping
+    grasp_reward_scale = 50.0       # Increased reward for proper grasping
     finger_position_scale = 2.0     # Increased reward for good finger positioning
     preposition_reward_scale = 1.0
     height_bonus_threshold = 0.3    # Used only for direct IK testing
     z_velocity_scale = 5.0          # Scale for z-velocity bonus during lifting
     vel_penalty_scale = 1.0         # Penalty for excessive velocity
     angvel_penalty_scale = 0.1       # Penalty for excessive angular velocity
-    z_pos_reward_scale = 1.0       # Scale for z-position reward
-    contact_reward_scale = 1.0    # Scale for contact reward
+    z_pos_reward_scale = 10.0       # Scale for z-position reward
+    contact_reward_scale = 0.5    # Scale for contact reward
+    height_bonus_threshold = 0.05 # Height threshold for bonus
 
 class NextageShadowGraspEnv(DirectRLEnv):
     # pre-physics step calls
@@ -227,13 +242,16 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.robot_dof_targets = torch.zeros((self.num_envs, self._robot.num_joints), device=self.device)
 
         stage = get_current_stage()
-        self.eef_link_idx = self._robot.find_bodies(self.cfg.shadow_hand_util.ik_target_link)[0][0]
+        self.eef_link_idx = self._robot.find_bodies(self.cfg.hand_util.ik_target_link)[0][0]
         self.position_tip_link_indices = self._find_all_indices(
-            self.cfg.shadow_hand_util.position_tip_links, mode="link"
+            self.cfg.hand_util.position_tip_links, mode="link"
         )
-        self.force_tip_link_indices = self._find_all_indices(
-            self.cfg.shadow_hand_util.force_tip_links, mode="contact"
-        )
+        if not self.cfg.off_contact_sensor:
+            self.force_tip_link_indices = self._find_all_indices(
+                self.cfg.hand_util.force_tip_links, mode="contact"
+            )
+        else:
+            self.force_tip_link_indices = []
 
         ### self._undesired_contact_body_ids, _ = self._contact_sensor.find_bodies(".*THIGH")
         self.robot_grasp_rot = torch.zeros((self.num_envs, 4), device=self.device)
@@ -247,7 +265,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.obj_initial_pos = torch.zeros((self.num_envs, 3), device=self.device)
 
         self.ref_target_pos = torch.zeros((self.num_envs, 3), device=self.device)
-        self.ref_finger_offset = torch.zeros((self.num_envs, len(self.cfg.shadow_hand_util.position_tip_links), 3), device=self.device)
+        self.ref_finger_offset = torch.zeros((self.num_envs, len(self.cfg.hand_util.position_tip_links), 3), device=self.device)
 
         # Initialize environment-specific buffers
         if self.cfg.use_memory_efficient_mode:
@@ -268,15 +286,27 @@ class NextageShadowGraspEnv(DirectRLEnv):
             # Initialize for vertical tracking
             self.prev_obj_height = None  # Will be initialized during first reward computation
 
-        self.shape_joint = torch.tensor(self.cfg.shadow_hand_util.shape_joint, device=self.device)
-        self.preshape_joint = torch.tensor(self.cfg.shadow_hand_util.preshape_joint, device=self.device)
+        self.shape_joint = torch.tensor(self.cfg.hand_util.shape_joint, device=self.device)
+        self.preshape_joint = torch.tensor(self.cfg.hand_util.preshape_joint, device=self.device)
 
         # ── Right-arm DOF indices ──────────────────────────────────────────
         self.arm_indices = self._find_all_indices(self.cfg.robot_cfg.arm_names, mode="joint")
 
         # ── Right-hand DOF indices ───────────────────────────────────────
-        self.hand_full_indices = self._find_all_indices(self.cfg.shadow_hand_util.hand_full_joint_names, mode="joint")
-        self.reference_traj_info = ReferenceTrajInfo(self.num_envs, self.device)
+        self.hand_full_indices = self._find_all_indices(self.cfg.hand_util.hand_full_joint_names, mode="joint")
+        self.is_training = self.cfg.is_training
+
+        # when testing, increase the length of pick-up just for visualization purpose
+        if not self.is_training:
+            self.cfg.episode_length_s *= 2
+
+        self.reference_traj_info = ReferenceTrajInfo(
+            self.num_envs, self.device,
+            finger_coupling_rule=self.cfg.hand_util.couplingRuleTensor,
+            n_hand_joints=len(self.cfg.hand_util.hand_full_joint_names),
+            is_training=self.is_training,
+        )
+
 
     def _find_all_indices(self, joint_names, mode="link"):
         """Find all indices of joints matching the given names."""
@@ -297,13 +327,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
     def _setup_scene(self):
         self._robot = Articulation(self.cfg.robot)
         self._table = RigidObject(self.cfg.table)
-        self._obj = RigidObject(self.cfg.obj)
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
-
-        self.scene.articulations["robot"] = self._robot
-        self.scene.rigid_objects["table"] = self._table
-        self.scene.rigid_objects["obj"] = self._obj
-        self.scene.sensors["contact_sensor"] = self._contact_sensor
 
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
@@ -312,14 +336,21 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.markers = VisualizationMarkers(self.cfg.marker)
 
         # clone and replicate
-        self.scene.clone_environments(copy_from_source=False)
+        # self.scene.clone_environments(copy_from_source=False)
+
+        self._obj = RigidObject(self.cfg.obj)
+        self.scene.articulations["robot"] = self._robot
+        self.scene.rigid_objects["table"] = self._table
+        self.scene.rigid_objects["obj"] = self._obj
+        if not self.cfg.off_contact_sensor:
+            self.scene.sensors["contact_sensor"] = self._contact_sensor
 
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
         stage = get_current_stage()
-        self._sq_params = self._infer_sq_params(stage)
+        self._sq_params = None # self._infer_sq_params(stage)
         self._obj_scales = self._get_obj_scale(stage)
 
         self.hand_only_sim = self.cfg.robot_name == "shadow"
@@ -374,7 +405,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         diff_ik_controller = DifferentialIKController(diff_ik_cfg, num_envs=len(env_ids), device=self.device)
         # reset controller
         diff_ik_controller.reset()
-        robot_entity_cfg = SceneEntityCfg("robot", joint_names=self.cfg.robot_cfg.arm_names,  body_names=[self.cfg.shadow_hand_util.ik_target_link])
+        robot_entity_cfg = SceneEntityCfg("robot", joint_names=self.cfg.robot_cfg.arm_names,  body_names=[self.cfg.hand_util.ik_target_link])
 
         # Resolving the scene entities
         robot_entity_cfg.resolve(self.scene)
@@ -411,16 +442,19 @@ class NextageShadowGraspEnv(DirectRLEnv):
             env_slice, timestep_ratio,
             current_handP_world=cur_eef_pos[env_slice],
             current_handQ_world=cur_eef_rot[env_slice],
-            current_hand_joint=self.robot_dof_targets[env_slice, self.hand_full_indices]
+            current_hand_joint=self.robot_dof_targets[env_slice, self.hand_full_indices],
+            action_handP=self.actions[env_slice, :3] * self.action_scale[None, :3],
+            action_handQ=None,
+            action_hand_joint=self.actions[env_slice, len(self.arm_indices):-1] * self.action_scale[None, len(self.arm_indices):-1],
         )
-        ik_target_pos = ik_target_pos + self.actions[env_slice, :3] * self.action_scale[None, :3]
+        # ik_target_pos = ik_target_pos + self.actions[env_slice, :3] * self.action_scale[None, :3]
         # ik_target_rot = self.actions[env_slice, 3:7] * self.cfg.action_scale
         arm_targets, self.ik_fail = self._solve_ik(env_slice, ik_target_pos, ik_target_rot)
         ### Fingers
-        finger_targets = finger_targets + ~self.reference_traj_info.pick_flg[env_slice, None] * self.actions[env_slice, len(self.arm_indices):-1] * self.action_scale[None, len(self.arm_indices):-1]
+        # finger_targets = finger_targets + ~self.reference_traj_info.pick_flg[env_slice, None] * self.actions[env_slice, len(self.arm_indices):-1] * self.action_scale[None, len(self.arm_indices):-1]
 
         self.robot_dof_targets[env_slice, self.arm_indices] = torch.clamp(arm_targets, self.robot_dof_lower_limits[self.arm_indices], self.robot_dof_upper_limits[self.arm_indices])
-        self.robot_dof_targets[env_slice, self.hand_full_indices] = finger_targets # torch.clamp(finger_targets, self.robot_dof_lower_limits[self.hand_full_indices], self.robot_dof_upper_limits[self.hand_full_indices])
+        self.robot_dof_targets[env_slice, self.hand_full_indices] = finger_targets #torch.clamp(finger_targets, self.robot_dof_lower_limits[self.hand_full_indices], self.robot_dof_upper_limits[self.hand_full_indices])
 
 
     def _get_current_eef_pose(self):
@@ -488,7 +522,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
             "grasp_approach_horizontal": [0.0 for _ in range(num_envs_to_reset)],
             "back": [0.15 for _ in range(num_envs_to_reset)],
         }
-        self.reference_traj_info.update(env_ids, **self.cfg.shadow_hand_util.getReferenceTrajInfo(cwp_config, self.device), reset=True)
+        self.reference_traj_info.update(env_ids, **self.cfg.hand_util.getReferenceTrajInfo(cwp_config, self.device), reset=True)
         ik_target_pos, ik_target_rot, finger_targets = self.reference_traj_info.get(env_ids, torch.tensor([0.0] * num_envs_to_reset, device=self.device))
         arm_targets, ik_fail = self._solve_ik(env_ids, ik_target_pos, ik_target_rot)
 
@@ -506,10 +540,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         # Refresh intermediate values for the specified environments
         self._compute_intermediate_values(env_ids)
-        self._visualize()
-
-        # Set training flag for exploration
-        self.is_training = True
+        # self._visualize()
 
     def _get_observations(self) -> dict:
         self._compute_intermediate_values()
@@ -552,16 +583,15 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         self.ref_target_pos[env_ids] = self.obj_pos[env_ids]
         self.ref_target_pos[env_ids, 2] += self._obj_scales[env_ids, 2] - 0.02
-
         # simple x-axis translation
         self.ref_finger_offset[env_ids, :, 0] = torch.tensor([ 1,  1,  1, -1], device='cuda:0').unsqueeze(0) *  self._obj_scales[env_ids, 0].unsqueeze(1)
 
         self.current_finger_pos = {
-            k: self._robot.data.body_pos_w[:, link_idx] for k, link_idx in zip(self.cfg.shadow_hand_util.position_tip_links, self.position_tip_link_indices)
+            k: self._robot.data.body_pos_w[:, link_idx] for k, link_idx in zip(self.cfg.hand_util.position_tip_links, self.position_tip_link_indices)
         }
 
         self.target_finger_pos = {
-            k: self.ref_target_pos + self.ref_finger_offset[:, i] for i, k in enumerate(self.cfg.shadow_hand_util.position_tip_links)
+            k: self.ref_target_pos + self.ref_finger_offset[:, i] for i, k in enumerate(self.cfg.hand_util.position_tip_links)
         }
 
         self.hand2obj = compute_object_state_in_hand_frame(
@@ -573,7 +603,10 @@ class NextageShadowGraspEnv(DirectRLEnv):
         )
 
         # Contact
-        self.net_contact_forces = self._contact_sensor.data.net_forces_w_history[:, :, self.force_tip_link_indices]
+        if not self.cfg.off_contact_sensor:
+            self.net_contact_forces = self._contact_sensor.data.net_forces_w_history[:, :, self.force_tip_link_indices]
+        else:
+            self.net_contact_forces = None
 
     def _get_rewards(self) -> torch.Tensor:
         # Refresh the intermediate values after the physics steps
@@ -586,21 +619,33 @@ class NextageShadowGraspEnv(DirectRLEnv):
         dist_reward = dist_reward * dist_reward * self.cfg.dist_reward_scale
 
         # check grasp stability
-        vel = torch.norm(self.hand2obj["lin_vel"], dim=-1)
-        ang_vel = torch.norm(self.hand2obj["ang_vel"], dim=-1)
+        vel = torch.norm(self._obj.data.root_lin_vel_w, dim=-1)
+        ang_vel = torch.norm(self._obj.data.root_ang_vel_w, dim=-1)
         vel_penalty = - (vel * self.cfg.vel_penalty_scale + ang_vel * self.cfg.angvel_penalty_scale)
+        vel_penalty = torch.where(~self.reference_traj_info.pick_flg, vel_penalty, torch.zeros_like(vel_penalty))
 
-        obj_z_pos_reward = torch.clamp(self.obj_pos[:, 2] - self._obj_scales[:, 2], min=0.0) * self.cfg.z_pos_reward_scale
+        obj_z_pos = torch.clamp(self.obj_pos[:, 2] - self.cfg.table_height - self._obj_scales[:, 2], min=0.0)
+        obj_z_pos_reward = torch.where(
+            self.reference_traj_info.pick_flg,
+            obj_z_pos * self.cfg.z_pos_reward_scale,
+            torch.zeros_like(obj_z_pos)
+        )
 
         # contact forces
-        is_contact = torch.max(torch.norm(self.net_contact_forces, dim=-1), dim=1)[0] > 1.0
+        if self.net_contact_forces is not None:
+            is_contact = torch.max(torch.norm(self.net_contact_forces, dim=-1), dim=1)[0] > 1.0
+        else:
+            is_contact = torch.zeros((self.num_envs, 1), device=self.device, dtype=torch.bool)
         contacts_reward = torch.sum(is_contact, dim=1) * self.cfg.contact_reward_scale
 
+        rel_vel = torch.norm(self.hand2obj["lin_vel"], dim=-1)
         # grasp is success if the object is not moving with respect to the hand in the process of picking
-        is_grasped = torch.logical_and(vel < 0.1, self.reference_traj_info.pick_flg)
+        is_grasped = torch.logical_and(rel_vel < 0.1, self.reference_traj_info.pick_flg)
+        is_grasped_half = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold / 2)
+        is_grasped_full = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold)
         grasp_success_bonus = torch.where(
             is_grasped,
-            torch.ones_like(dist_reward) * self.cfg.grasp_reward_scale,
+            torch.ones_like(dist_reward) * torch.clamp(obj_z_pos / self.cfg.height_bonus_threshold, max=1) * self.cfg.grasp_reward_scale,
             torch.zeros_like(dist_reward)
         )
 
@@ -618,8 +663,9 @@ class NextageShadowGraspEnv(DirectRLEnv):
             "dist_reward": safe_mean(dist_reward),
             "grasp_reward": safe_mean(grasp_success_bonus),
             "vel_penalty": safe_mean(vel_penalty),
-            "num_grasped": safe_mean(is_grasped, mask=self.reference_traj_info.pick_flg),
-            "z_pos_reward": safe_mean(obj_z_pos_reward),
+            "num_grasped": safe_mean(is_grasped_full, mask=self.reference_traj_info.pick_flg),
+            "num_grasped_half": safe_mean(is_grasped_half, mask=self.reference_traj_info.pick_flg),
+            "z_pos_reward": safe_mean(obj_z_pos_reward, mask=self.reference_traj_info.pick_flg),
             "contacts_reward": safe_mean(contacts_reward),
         }
         return rewards
@@ -666,7 +712,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
             all_orientations = []
             all_marker_indices = []
 
-            for cnt, k in enumerate(self.cfg.shadow_hand_util.position_tip_links):
+            for cnt, k in enumerate(self.cfg.hand_util.position_tip_links):
                 pos = self.target_finger_pos[k][env_ids]  # (N, 3)
                 ori = torch.tensor([[1, 0, 0, 0]], device=self.device).repeat(len(env_ids), 1)  # (N, 4)
                 idx = torch.zeros(len(env_ids), dtype=torch.int64, device=self.device)  # (N,)
@@ -697,7 +743,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         sq_params = []
         for i in range(self.num_envs):
-            prim_path = f"/World/envs/env_{i}/obj"
+            prim_path = f"/World/envs/env_{i}/Object"
             prim = stage.GetPrimAtPath(prim_path)
             if not prim.IsValid():
                 print(f"[{i}] Not Found")
@@ -721,9 +767,9 @@ class NextageShadowGraspEnv(DirectRLEnv):
         scales = []
         for i in env_ids:
             # Get the prim at the specified path
-            # Example path: "/World/envs/env_0/obj"
+            # Example path: "/World/envs/env_0/Object"
             # Note: The path may vary based on your USD structure
-            prim_path = f"/World/envs/env_{i}/obj"
+            prim_path = f"/World/envs/env_{i}/Object"
             prim = stage.GetPrimAtPath(prim_path)
             xform = UsdGeom.Xformable(prim)
             for op in xform.GetOrderedXformOps():

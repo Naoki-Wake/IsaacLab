@@ -8,6 +8,7 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import numpy as np
 
 from isaaclab.app import AppLauncher
 
@@ -70,6 +71,7 @@ def main():
     env_cfg = parse_env_cfg(
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
+    env_cfg.is_training = False
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # specify directory for logging experiments
@@ -140,14 +142,21 @@ def main():
     obs, _ = env.get_observations()
     timestep = 0
     # simulate environment
+    from collections import defaultdict
+    logs = defaultdict(list)
+
     while simulation_app.is_running():
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
             actions = policy(obs)
+            logs["actions"].append(actions.cpu().numpy())
+            logs["obs"].append(obs.cpu().numpy())
             # env stepping
-            obs, _, _, _ = env.step(actions)
+            obs, rewards, _, _ = env.step(actions)
+            logs["rewards"].append(rewards.cpu().numpy())
+
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video
@@ -162,6 +171,10 @@ def main():
     # close the simulator
     env.close()
 
+    # save logs as npz file
+    logs_path = os.path.join(log_dir, "logs.npz")
+    np.savez(logs_path, **logs)
+    print(f"[INFO] Saved logs to {logs_path}")
 
 if __name__ == "__main__":
     # run the main function
