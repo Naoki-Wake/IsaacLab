@@ -134,7 +134,7 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     )
 
     # first person camera
-    if not self.cfg.off_contact_sensor:
+    if not off_contact_sensor:
         camera = CameraCfg(
             prim_path="/World/envs/env_.*/Robot/LEFT_CAMERA/front_cam",
             update_period=0.1,
