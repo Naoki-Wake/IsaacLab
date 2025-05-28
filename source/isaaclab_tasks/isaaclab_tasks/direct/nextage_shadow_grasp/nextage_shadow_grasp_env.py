@@ -47,7 +47,7 @@ fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
 import omni.usd
 import os
-use_camera = False
+use_camera = True
 torch.autograd.set_detect_anomaly(True)
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 os.environ["TORCH_USE_CUDA_DSA"] = "1"
@@ -63,7 +63,7 @@ ISAAC_ROOT_DIR = "/home/nawake/IsaacLab"
 class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     # env
     episode_length_s = 3
-    decimation = 2
+    decimation = 10
     action_space = 23 # 6 + 16 + 1
     observation_space = 58#42
     state_space = 0
@@ -132,19 +132,33 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     )
 
     # first person camera
+    #if use_camera:
+    #    camera = CameraCfg(
+    #        prim_path="/World/envs/env_.*/Robot/LEFT_CAMERA/front_cam",
+    #        update_period=0.1,
+    #        height=240,
+    #        width=320,
+    #        data_types=["rgb", "distance_to_image_plane"],
+    #        spawn=sim_utils.PinholeCameraCfg(
+    #            focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
+    #        ),
+    #        offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=(0.58965,0.39028,-0.39028,-0.58965), convention="opengl"),
+    #        #offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=quat_from_euler_xyz(torch.tensor(0.0), torch.deg2rad(torch.tensor(-67.0)), torch.tensor(-math.pi/2.0)), convention="opengl"),
+    #    )
     if use_camera:
         camera = CameraCfg(
-            prim_path="/World/envs/env_.*/Robot/LEFT_CAMERA/front_cam",
+            prim_path="/World/envs/env_.*/side_cam",
             update_period=0.1,
             height=480,
             width=640,
-            data_types=["rgb", "distance_to_image_plane"],
+            data_types=["rgb"],
             spawn=sim_utils.PinholeCameraCfg(
                 focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
             ),
-            offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=(0.58965,0.39028,-0.39028,-0.58965), convention="opengl"),
+            offset=CameraCfg.OffsetCfg(pos=(0.3,0.3,1.0), rot=(0.29,0.24,0.55,0.74), convention="opengl"),
             #offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=quat_from_euler_xyz(torch.tensor(0.0), torch.deg2rad(torch.tensor(-67.0)), torch.tensor(-math.pi/2.0)), convention="opengl"),
         )
+
         #camera: TiledCameraCfg = TiledCameraCfg(
         #    prim_path="/World/envs/env_.*/Robot/LEFT_CAMERA/front_cam",
         #    offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=(0.58965,0.39028,-0.39028,-0.58965), convention="opengl"),
@@ -332,7 +346,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.episode_ctr = torch.zeros(self.num_envs, dtype=torch.int32)
         self.champion_indices = torch.zeros(self.num_envs, dtype=torch.int32)
         self.gpt_ctr = 0
-
+        self.step_in_episode = 0
+        self.camera_skip = 2  # Skip camera frames for faster processing
     def _capture_frame(self):
         tex = self._camera.data.output["rgb"]          # (N,H,W,4) float32 [0,1]
         if tex.shape[0] == 0:
@@ -394,7 +409,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
     def _write_video(self, env_id):
         if not self.frames[env_id]:
             return
-        fps  = int(1.0 / self.dt)
+        fps  = int(1.0 / (self.dt * self.camera_skip))
         ep   = int(self.episode_ctr[env_id])
         if not os.path.exists("./videos"):
             os.makedirs("./videos")
@@ -733,13 +748,18 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         # Contact
         self.net_contact_forces = self._contact_sensor.data.net_forces_w_history[:, :, self.force_tip_link_indices]
+
         if use_camera:
-            rgb = self._camera.data.output["rgb"].cpu().numpy()      # (N, H, W, 4)
-            rgb = (rgb[..., :3]).astype(np.uint8)              # strip alpha
-            for i in range(self.num_envs):
-                self.frames[i].append(rgb[i])
-        # write a buffer to an image for debugging
-        # print('new frame is added')
+            self.step_in_episode += 1
+            if self.step_in_episode % self.camera_skip == 0:
+                #self._capture_frame()
+                self.step_in_episode = 0
+                rgb = self._camera.data.output["rgb"].cpu().numpy()      # (N, H, W, 4)
+                rgb = (rgb[..., :3]).astype(np.uint8)              # strip alpha
+                for i in range(self.num_envs):
+                    self.frames[i].append(rgb[i])
+            # write a buffer to an image for debugging
+            # print('new frame is added')
 
     def _get_rewards(self) -> torch.Tensor:
         # Refresh the intermediate values after the physics steps
