@@ -336,7 +336,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.frames      = [[] for _ in range(self.num_envs)]
         self.episode_ctr = torch.zeros(self.num_envs, dtype=torch.int32)
         self.champion_indices = torch.zeros(self.num_envs, dtype=torch.int32)
-
+        self.extras["obj_scale"] = self._obj_scales
+        self.extras["obj_sq_params"] = self._obj_sq_params
 
     # def _capture_frame(self):
     #     tex = self._camera.data.output["rgb"]          # (N,H,W,4) float32 [0,1]
@@ -395,7 +396,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         light_cfg.func("/World/Light", light_cfg)
 
         stage = get_current_stage()
-        self._sq_params = self._infer_sq_params(stage)
+        self._obj_sq_params = self._infer_sq_params(stage)
         self._obj_scales = self._get_obj_scale(stage)
 
         self.hand_only_sim = self.cfg.robot_name == "shadow"
@@ -492,9 +493,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
             action_handQ=None,
             action_hand_joint=self.actions[env_slice, len(self.arm_indices):-1] * self.action_scale[None, len(self.arm_indices):-1],
         )
-        # ik_target_pos = ik_target_pos + self.actions[env_slice, :3] * self.action_scale[None, :3]
-        # ik_target_rot = self.actions[env_slice, 3:7] * self.cfg.action_scale
         arm_targets, self.ik_fail = self._solve_ik(env_slice, ik_target_pos, ik_target_rot)
+
         ### Fingers
         # finger_targets = finger_targets + ~self.reference_traj_info.pick_flg[env_slice, None] * self.actions[env_slice, len(self.arm_indices):-1] * self.action_scale[None, len(self.arm_indices):-1]
 
@@ -615,6 +615,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
                 finger_effort,
                 self.obj_pos,
                 self.obj_rot,
+                self.actions,
             ),
             dim=-1,
         )
@@ -726,6 +727,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
                 return x.float().mean().item()
             return x if isinstance(x, (int, float)) else 0.0
 
+        self.extras["success"] = is_grasped_full
         self.extras["log"] = {
             "rewards": safe_mean(rewards),
             "dist_reward": safe_mean(dist_reward),

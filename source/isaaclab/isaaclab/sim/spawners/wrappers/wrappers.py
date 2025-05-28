@@ -118,7 +118,6 @@ def spawn_multi_asset(
     # return the prim
     return prim_utils.get_prim_at_path(prim_paths[0])
 
-
 def spawn_multi_usd_file(
     prim_path: str,
     cfg: wrappers_cfg.MultiUsdFileCfg,
