@@ -15,7 +15,7 @@
 **/*.usda
 **/*.usdc
 **/*.usdz
-
+**/sq_*
 # Python
 .DS_Store
 **/*.egg-info/
