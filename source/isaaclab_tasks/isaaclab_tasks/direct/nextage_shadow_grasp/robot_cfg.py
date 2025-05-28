@@ -30,7 +30,14 @@ class RobotCfg():
                     velocity_limit=1e6,       # Allows very high velocity
                     stiffness=1e6,            # Allows very high stiffness
                     damping=1e3,              # Enough damping to prevent oscillations
-                )
+                ),
+                "head": ImplicitActuatorCfg(
+                    joint_names_expr=["HEAD_JOINT[01]"],   # match both DoFs
+                    effort_limit=200,            # sane torque
+                    velocity_limit=10,
+                    stiffness=50,                # PD gains; tune to taste
+                    damping=5,
+                ),
             }
             self.arm_names = ["RARM_JOINT0", "RARM_JOINT1", "RARM_JOINT2", "RARM_JOINT3", "RARM_JOINT4", "RARM_JOINT5"]
         elif robot_name == "shadow":

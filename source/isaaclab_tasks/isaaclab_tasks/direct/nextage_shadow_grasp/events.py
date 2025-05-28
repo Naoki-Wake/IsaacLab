@@ -21,9 +21,9 @@ def create_grasp_event_cfg(base_obj_size) -> EventCfg:
         mode="prestartup",
         params={
             # scale relative to the base size x(0.5, 1.25)
-            "scale_range": {"x": (0.5 * base_obj_size[0], 1.25 * base_obj_size[0]),
-                           "y": (0.5 * base_obj_size[1], 1.25 * base_obj_size[1]),
-                           "z": (0.5 * base_obj_size[2], 1.25 * base_obj_size[2])},
+            "scale_range": {"x": (0.4 * base_obj_size[0], 0.6 * base_obj_size[0]),
+                           "y": (0.4 * base_obj_size[1], 0.6 * base_obj_size[1]),
+                           "z": (0.4 * base_obj_size[2], 0.6 * base_obj_size[2])},
             "asset_cfg": SceneEntityCfg("obj"),
         },
     )

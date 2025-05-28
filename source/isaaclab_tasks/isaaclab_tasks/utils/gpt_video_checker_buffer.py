@@ -173,8 +173,10 @@ def ask_gpt(
     client, params = init_vlm_client(creds)
 
     frames_a = sample_frames(ask_video, num_frames)
+    print(f"loaded ask_video from {ask_video}")
     frames_b = sample_frames(champ_video, num_frames)
-
+    print(f"loaded champ_video from {champ_video}")
+    
     prompt_content = build_prompt_content(frames_a, frames_b, task)
     result = query_vlm(client, params, prompt_content)
     # print(result)
