@@ -57,6 +57,31 @@ class RobotCfg():
                 )
             }
             self.arm_names = ["rh_Tx", "rh_Ty", "rh_Tz", "rh_roll", "rh_pitch", "rh_yaw"]
+        elif robot_name == "ur10-honda":
+            self.usd_path = "scripts/my_models/honda/ur10_honda_fix_physics.usd"
+            self.init_joint_pos = {
+                "shoulder_pan_joint": 0.0, "shoulder_lift_joint": 0.0, "elbow_joint": 0.0, "wrist_1_joint": 0.0,
+                "wrist_2_joint": 0.0, "wrist_3_joint": 0.0,
+            }
+            self.init_pos, self.init_rot = (-0.65, 0.3, 0.8), (1.0, 0.0, 0.0, 0.0)
+            self.actuators = {
+                "right_arm": ImplicitActuatorCfg(
+                    joint_names_expr=["shoulder_.*", "elbow_.*", "wrist_.*"],
+                    effort_limit=1e6,         # Allows very high effort
+                    velocity_limit=1e6,       # Allows very high velocity
+                    stiffness=1e6,            # Allows very high stiffness
+                    damping=1e3,              # Enough damping to prevent oscillations
+                ),
+                "right_hand": ImplicitActuatorCfg(
+                    joint_names_expr=["RHand_.*"],
+                    effort_limit=1e6,         # Allows very high effort
+                    velocity_limit=1e6,       # Allows very high velocity
+                    stiffness=1e6,            # Allows very high stiffness
+                    damping=1e3,              # Enough damping to prevent oscillations
+                )
+            }
+            self.arm_names = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
+
 
     def get_articulation_cfg(self) -> ArticulationCfg:
         return ArticulationCfg(
