@@ -161,7 +161,7 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
         prim_path="/World/envs/env_.*/obj",
         spawn=sim_utils.MultiUsdFileCfg(
             usd_path=sorted(glob.glob(os.path.join("source/isaaclab_assets/data/Props/Superquadrics", "sq_*.usd"))),
-            scale=(0.04, 0.04, 0.04),
+            scale=(0.1, 0.1, 0.1),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 max_depenetration_velocity=1000,
                 disable_gravity=False,
