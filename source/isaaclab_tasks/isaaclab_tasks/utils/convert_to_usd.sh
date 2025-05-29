@@ -37,10 +37,10 @@ for obj_file in "$OBJ_DIR"/*.obj; do
         # --make-instanceable \
 
     echo "Converting $usd_file → $usda_file"
-    usdcat ${usd_file} --out ${usda_file}
+    #usdcat ${usd_file} --out ${usda_file}
 
-    echo "Referring to $abs_geom_ref in $usda_file"
-    sed -i "s|@./Props/instanceable_meshes.usd@|@${abs_geom_ref}@|g" "${usda_file}"
+    #echo "Referring to $abs_geom_ref in $usda_file"
+    #sed -i "s|@./Props/instanceable_meshes.usd@|@${abs_geom_ref}@|g" "${usda_file}"
 done
 
 echo "All USDs flattened and saved under: $USD_BASE_DIR"

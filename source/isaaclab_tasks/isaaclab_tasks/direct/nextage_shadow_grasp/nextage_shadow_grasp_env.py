@@ -10,7 +10,6 @@ import numpy as np
 import math
 import glob
 from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
-import shutil
 from isaacsim.core.utils.stage import get_current_stage
 from isaacsim.core.utils.torch.transformations import tf_combine, tf_inverse, tf_vector
 from pxr import UsdGeom, Ar
@@ -89,7 +88,7 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     )
 
     # robot
-    robot_name = "nextage-shadow" # or "nextage-shadow" or "shadow"
+    robot_name = "shadow" # or "nextage-shadow" or "shadow"
     if "shadow" in robot_name: n_finger_joint = 16
     elif "honda" in robot_name: n_finger_joint = 18
     action_space = 6 + n_finger_joint + 1
@@ -97,7 +96,6 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     # more context or the full code snippet, I can help you understand what it is trying to do.
     off_contact_sensor = robot_name == "ur10-honda"
     off_camera_sensor = True
-
     env_spacing = 1.5 if robot_name == "shadow" else 3.0
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1024, env_spacing=env_spacing, replicate_physics=False)
@@ -105,7 +103,6 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     robot_cfg = RobotCfg(robot_name)
     robot_cfg.init_joint_pos["HEAD_JOINT1"] = 0.32
     robot = robot_cfg.get_articulation_cfg()
-
     contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*", history_length=1, update_period=0.005, track_air_time=True
     )
@@ -134,30 +131,17 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     )
 
     # first person camera
-    if not off_contact_sensor:
-        camera = CameraCfg(
-            prim_path="/World/envs/env_.*/Robot/LEFT_CAMERA/front_cam",
-            update_period=0.1,
-            height=480,
-            width=640,
-            data_types=["rgb", "distance_to_image_plane"],
-            spawn=sim_utils.PinholeCameraCfg(
-                focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
-            ),
-            offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=(0.58965,0.39028,-0.39028,-0.58965), convention="opengl"),
-            #offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=quat_from_euler_xyz(torch.tensor(0.0), torch.deg2rad(torch.tensor(-67.0)), torch.tensor(-math.pi/2.0)), convention="opengl"),
-        )
-        #camera: TiledCameraCfg = TiledCameraCfg(
-        #    prim_path="/World/envs/env_.*/Robot/LEFT_CAMERA/front_cam",
-        #    offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=(0.58965,0.39028,-0.39028,-0.58965), convention="opengl"),
-        #    data_types=["rgb"],
-        #    spawn=sim_utils.PinholeCameraCfg(
-        #        focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
-        #    ),
-        #    width=640,
-        #    height=480,
-        #)
-
+    camera = CameraCfg(
+        prim_path="/World/envs/env_.*/Robot/LEFT_CAMERA/front_cam",
+        update_period=0.1,
+        height=480,
+        width=640,
+        data_types=["rgb", "distance_to_image_plane"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
+        ),
+        offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=(0.58965,0.39028,-0.39028,-0.58965), convention="opengl"),
+    )
 
     events: EventCfg = create_grasp_event_cfg(base_obj_size=obj_size_half)
     obj_asset_cfgs = [
@@ -354,92 +338,18 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.frames      = [[] for _ in range(self.num_envs)]
         self.episode_ctr = torch.zeros(self.num_envs, dtype=torch.int32)
         self.champion_indices = torch.zeros(self.num_envs, dtype=torch.int32)
-        self.gpt_ctr = 0
+        self.extras["obj_scale"] = self._obj_scales
+        self.extras["obj_sq_params"] = self._obj_sq_params
 
-    def _capture_frame(self):
-        tex = self._camera.data.output["rgb"]          # (N,H,W,4) float32 [0,1]
-        if tex.shape[0] == 0:
-            return                                     # sensor not ready yet
-        rgb = (tex[..., :3] * 255).to(torch.uint8)     # drop alpha, stay GPU
-        cpu = rgb.contiguous().clone().cpu().numpy()   # deep-copy → CPU
-        for env_id in range(self.num_envs):
-            self.frames[env_id].append(cv2.cvtColor(cpu[env_id],
-                                                    cv2.COLOR_RGB2BGR))
-            
-    def _compare_champion(self, candidate_path, champion_path="videos/champion.mp4"):
-        """
-        Compare a candidate video with the current champion video.
-        If the candidate is judged better, replace the champion and archive the old one.
-        
-        Args:
-            candidate_path (str): Path to the new candidate video.
-            champion_path (str): Path to the current champion video.
-            
-        Returns:
-            bool: True if candidate becomes new champion, False otherwise.
-        """
-        if os.path.exists(champion_path):
-            winner_first, reason = ask_gpt(
-                candidate_path,
-                champion_path,
-                "grasp and pick up the object",
-                creds_path="source/isaaclab_tasks/isaaclab_tasks/utils/auth.env",
-                num_frames=10,
-            )
-            self.gpt_ctr += 1
-            if winner_first: # candidate is better
-                print(f"Candidate video {candidate_path} is better than champion {champion_path}.")
-                # Archive the old champion
-                existing = glob.glob("videos/*_champion.mp4")
-                indices = [int(os.path.basename(p).split("_")[0]) for p in existing if os.path.basename(p).split("_")[0].isdigit()]
-                archive_index = max(indices, default=-1) + 1
-                archived_path = f"videos/{archive_index}_champion.mp4"
-                shutil.move(champion_path, archived_path)
-                # log the reason for the decision with the archive
-                reason = reason + f" (GPTcount-{self.gpt_ctr})"
-                with open(f"videos/{archive_index}_reason.txt", "w") as f:
-                    f.write(reason)
-                # Promote the candidate
-                assert not os.path.exists(champion_path), f"Champion path {champion_path} already exists."
-                shutil.move(candidate_path, champion_path)
-                return True
-            else:
-                # Discard the candidate
-                os.remove(candidate_path)
-                print(f"Candidate video {candidate_path} discarded. Reason: {reason}")
-                return False
-        else:
-            # No existing champion: promote candidate directly but not reaward as champion
-            shutil.move(candidate_path, champion_path)
-            return False
-        
-
-    def _write_video(self, env_id):
-        if not self.frames[env_id]:
-            return
-        fps  = int(1.0 / self.dt)
-        ep   = int(self.episode_ctr[env_id])
-        if not os.path.exists("./videos"):
-            os.makedirs("./videos")
-        path = f"./videos/env{env_id:04d}_ep{ep:05d}.mp4"
-
-        H, W, _ = self.frames[env_id][0].shape
-        vw = cv2.VideoWriter(path, fourcc, fps, (W, H))   # open writer
-        print(f"writing {len(self.frames[env_id])} frames to {path}")
-        for f in self.frames[env_id]:
-            bgr_f = cv2.cvtColor(f, cv2.COLOR_RGB2BGR)  # convert to BGR
-            vw.write(bgr_f)  # write frame
-        vw.release()
-        self.frames[env_id].clear()
-        self.episode_ctr[env_id] += 1
-        print(f"[env {env_id}] video saved → {path}")
-        print(f"[env {env_id}] comparing with champion...")
-        result = self._compare_champion(path, champion_path="videos/champion.mp4")
-        if result:
-            print(f"[env {env_id}] new champion video saved → {path}")
-            self.champion_indices[env_id] = 1
-            return True
-
+    # def _capture_frame(self):
+    #     tex = self._camera.data.output["rgb"]          # (N,H,W,4) float32 [0,1]
+    #     if tex.shape[0] == 0:
+    #         return                                     # sensor not ready yet
+    #     rgb = (tex[..., :3] * 255).to(torch.uint8)     # drop alpha, stay GPU
+    #     cpu = rgb.contiguous().clone().cpu().numpy()   # deep-copy → CPU
+    #     for env_id in range(self.num_envs):
+    #         self.frames[env_id].append(cv2.cvtColor(cpu[env_id],
+    #                                                 cv2.COLOR_RGB2BGR))
 
     def _find_all_indices(self, joint_names, mode="link"):
         """Find all indices of joints matching the given names."""
@@ -488,7 +398,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         light_cfg.func("/World/Light", light_cfg)
 
         stage = get_current_stage()
-        self._sq_params = self._infer_sq_params(stage)
+        self._obj_sq_params = self._infer_sq_params(stage)
         self._obj_scales = self._get_obj_scale(stage)
 
         self.hand_only_sim = self.cfg.robot_name == "shadow"
@@ -585,9 +495,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
             action_handQ=None,
             action_hand_joint=self.actions[env_slice, len(self.arm_indices):-1] * self.action_scale[None, len(self.arm_indices):-1],
         )
-        # ik_target_pos = ik_target_pos + self.actions[env_slice, :3] * self.action_scale[None, :3]
-        # ik_target_rot = self.actions[env_slice, 3:7] * self.cfg.action_scale
         arm_targets, self.ik_fail = self._solve_ik(env_slice, ik_target_pos, ik_target_rot)
+
         ### Fingers
         # finger_targets = finger_targets + ~self.reference_traj_info.pick_flg[env_slice, None] * self.actions[env_slice, len(self.arm_indices):-1] * self.action_scale[None, len(self.arm_indices):-1]
 
@@ -622,10 +531,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
         # if torch.any(out_of_bounds):
         #     print(f"obj(s) out of bounds horizontally! Max x-y displacement: {obj_horizontal_displacement.max().item():.3f}m")
         done_envs = torch.where(terminated | truncated)[0].tolist()
-
-        if not self.cfg.off_camera_senso:
-            for env_id in done_envs:
-                self._write_video(env_id)
         return terminated, truncated
 
     def _reset_idx(self, env_ids: torch.Tensor | None):
@@ -712,6 +617,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
                 finger_effort,
                 self.obj_pos,
                 self.obj_rot,
+                self.actions,
             ),
             dim=-1,
         )
@@ -722,7 +628,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
             env_ids = self._robot._ALL_INDICES
 
         self._obj.update(self.dt)
-
         if not self.cfg.off_camera_sensor:
             self._camera.update(self.dt)
         if not self.cfg.off_contact_sensor:
@@ -754,7 +659,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
         )
 
         # Contact
-
         if not self.cfg.off_contact_sensor:
             self.net_contact_forces = self._contact_sensor.data.net_forces_w_history[:, :, self.force_tip_link_indices]
         else:
@@ -769,6 +673,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
             # print('new frame is added')
         else:
             self.frames = None
+
 
     def _get_rewards(self) -> torch.Tensor:
         # Refresh the intermediate values after the physics steps
@@ -815,19 +720,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
             torch.zeros_like(is_grasped_full)
         )
 
-
-        # rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward
-        rewards = dist_reward + vel_penalty + obj_z_pos_reward
-        rewards_wo_bonus = rewards.clone()
-        # if self.champion_indices has an index of 1, give it a bonus
-        if torch.any(self.champion_indices == 1):
-            index_to_bonus = torch.where(self.champion_indices == 1)[0]
-            rewards[index_to_bonus] += 100.0
-            print(f"Bonus applied to envs: {index_to_bonus.tolist()}")
-            # flash the self.champion_indices
-            self.champion_indices[index_to_bonus] = 0
-            assert torch.all(self.champion_indices[index_to_bonus] == 0), f"Champion indices should be reset to 0, but got {self.champion_indices[index_to_bonus]}"
-
+        rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward
         # print(f"rewards: {rewards}")
         def safe_mean(x, mask=None):
             if mask is not None:
@@ -836,9 +729,9 @@ class NextageShadowGraspEnv(DirectRLEnv):
                 return x.float().mean().item()
             return x if isinstance(x, (int, float)) else 0.0
 
+        self.extras["success"] = is_grasped_full
         self.extras["log"] = {
             "rewards": safe_mean(rewards),
-            "rewards_wo_bonus": safe_mean(rewards_wo_bonus),
             "dist_reward": safe_mean(dist_reward),
             "grasp_reward": safe_mean(grasp_success_bonus),
             "vel_penalty": safe_mean(vel_penalty),
