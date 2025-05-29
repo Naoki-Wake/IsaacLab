@@ -6,8 +6,14 @@
 """Script to play a checkpoint if an RL agent from RSL-RL."""
 
 """Launch Isaac Sim Simulator first."""
+try:
+    from set_debugger import set_debugger; set_debugger()
+except ImportError:
+    pass
 
+from collections import defaultdict
 import argparse
+import numpy as np
 
 from isaaclab.app import AppLauncher
 
@@ -70,6 +76,7 @@ def main():
     env_cfg = parse_env_cfg(
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
+    env_cfg.is_training = False
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # specify directory for logging experiments
@@ -90,6 +97,12 @@ def main():
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+
+    def unwrap_env(env):
+        while hasattr(env, 'env'):
+            env = env.env
+        return env
+    base_env = unwrap_env(env)
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv):
@@ -137,17 +150,41 @@ def main():
     dt = env.unwrapped.step_dt
 
     # reset environment
-    obs, _ = env.get_observations()
+    obs, extras = env.get_observations()
     timestep = 0
     # simulate environment
+
+    def tensor_to_numpy(tensor):
+        if isinstance(tensor, dict):
+            return {k: tensor_to_numpy(v) for k, v in tensor.items()}
+        if isinstance(tensor, list):
+            return [tensor_to_numpy(t) for t in tensor]
+        if isinstance(tensor, torch.Tensor):
+            return tensor.cpu().numpy()
+        return tensor
+
+    def list_of_dict_to_dict_of_list(list_of_dicts):
+        result = defaultdict(list)
+        for d in list_of_dicts:
+            for k, v in d.items():
+                result[k].append(v)
+        return dict(result)
+
+    results = []
     while simulation_app.is_running():
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
             actions = policy(obs)
+            res = dict(obs=obs, actions=actions)
             # env stepping
-            obs, _, _, _ = env.step(actions)
+            obs, rewards, dones, extras = env.step(actions)
+            res.update(dict(rewards=rewards, dones=dones))
+            res.update(extras)
+            res = tensor_to_numpy(res)
+            results.append(res)
+
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video
@@ -159,9 +196,17 @@ def main():
         if args_cli.real_time and sleep_time > 0:
             time.sleep(sleep_time)
 
+    results = list_of_dict_to_dict_of_list(results)
+    # results["object_scale"] = base_env._obj_scales.cpu().numpy()
+    # results["object_sq_param"] = base_env._obj_sq_params.cpu().numpy()
+
     # close the simulator
     env.close()
 
+    # save logs as npz file
+    logs_path = os.path.join(log_dir, "logs.npz")
+    np.savez(logs_path, **results)
+    print(f"[INFO] Saved logs to {logs_path}")
 
 if __name__ == "__main__":
     # run the main function
