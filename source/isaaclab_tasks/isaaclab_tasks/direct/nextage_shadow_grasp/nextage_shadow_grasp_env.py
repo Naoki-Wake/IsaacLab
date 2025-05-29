@@ -732,7 +732,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.extras["success"] = is_grasped_full
         self.extras["log"] = {
             "rewards": safe_mean(rewards),
-            "rewards_wo_bonus": safe_mean(rewards_wo_bonus),
             "dist_reward": safe_mean(dist_reward),
             "grasp_reward": safe_mean(grasp_success_bonus),
             "vel_penalty": safe_mean(vel_penalty),
