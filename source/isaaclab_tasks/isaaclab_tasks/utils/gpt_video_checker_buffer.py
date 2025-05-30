@@ -96,8 +96,8 @@ def resize_and_encode(frame: np.ndarray, max_short: int = 768, max_long: int = 2
 
 
 def build_prompt_content(
-    frames_a: list[np.ndarray],
-    frames_b: list[np.ndarray],
+    frames_candidate: list[np.ndarray],
+    frames_champion: list[np.ndarray],
     task: str
 ) -> list[dict]:
     """
@@ -106,22 +106,22 @@ def build_prompt_content(
     content = []
     header = (
         f"I provide two sequences of first-person snapshots for task '{task}'.\n"
-        "First sequence A below."
+        "First sequence (challenger) below."
     )
     content.append({"type": "text", "text": header})
 
-    for frame in frames_a:
+    for frame in frames_candidate:
         uri = resize_and_encode(frame)
         content.append({"type": "image_url", "image_url": {"url": uri, "detail": "high"}})
 
-    content.append({"type": "text", "text": "Now sequence B below."})
-    for frame in frames_b:
+    content.append({"type": "text", "text": "Now next sequence (champion) below."})
+    for frame in frames_champion:
         uri = resize_and_encode(frame)
         content.append({"type": "image_url", "image_url": {"url": uri, "detail": "high"}})
 
     footer = (
-        f"Compare the two sequences and tell me which performs '{task}' better. If the two look similar, say second.\n"
-        "Answer in one word and return JSON like {\"answer\": \"first\" or \"second\", \"short_reason\": \"the reason in one sentence.\"}."
+        f"Compare the two sequences and tell me which performs '{task}' better. If the two look similar, say champion.\n"
+        "Answer in one word and return JSON like {\"answer\": \"challenger\" or \"champion\", \"short_reason\": \"the reason in one sentence.\"}."
     )
     content.append({"type": "text", "text": footer})
     return content
@@ -172,19 +172,19 @@ def ask_gpt(
     creds = load_credentials(creds_path)
     client, params = init_vlm_client(creds)
 
-    frames_a = sample_frames(ask_video, num_frames)
+    frames_candidate = sample_frames(ask_video, num_frames)
     print(f"loaded ask_video from {ask_video}")
-    frames_b = sample_frames(champ_video, num_frames)
+    frames_champion = sample_frames(champ_video, num_frames)
     print(f"loaded champ_video from {champ_video}")
     
-    prompt_content = build_prompt_content(frames_a, frames_b, task)
+    prompt_content = build_prompt_content(frames_candidate, frames_champion, task)
     result = query_vlm(client, params, prompt_content)
     # print(result)
     answer = result.get("answer", "").lower()
     # print(f"Answer: {result}")
-    if answer == "first":
+    if answer == "challenger":
         return True, result.get("short_reason", "")
-    elif answer == "second":
+    elif answer == "champion":
         return False, result.get("short_reason", "")
     else:
         print(f"Unexpected answer: {answer}")
