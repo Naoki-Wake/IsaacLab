@@ -58,14 +58,13 @@ class NextageShadowGraspVisionEnvCfg(NextageShadowGraspEnvCfg):
     )
 
     # robot
-    robot_name = "nextage-shadow" # or "nextage-shadow" or "shadow"
+    robot_name = "shadow" # or "nextage-shadow" or "shadow"
     if "shadow" in robot_name: n_finger_joint = 16
     elif "honda" in robot_name: n_finger_joint = 18
     action_space = 6 + n_finger_joint + 1
     # The code `contact_se` is not a valid Python code snippet. It seems to be incomplete or incorrect. If you provide
     # more context or the full code snippet, I can help you understand what it is trying to do.
     off_contact_sensor = robot_name == "ur10-honda"
-    off_camera_sensor = True
     env_spacing = 1.5 if robot_name == "shadow" else 3.0
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1024, env_spacing=env_spacing, replicate_physics=False)
@@ -79,7 +78,7 @@ class NextageShadowGraspVisionEnvCfg(NextageShadowGraspEnvCfg):
     grasp_type = "active"  # or "passive"
     hand_util = ShadowHandUtils(grasp_type=grasp_type) if "shadow" in robot_name else HondaHandUtils(grasp_type=grasp_type)
 
-    off_camera_sensor = False
+    off_camera_sensor = True
     camera = CameraCfg(
         prim_path="/World/envs/env_.*/side_cam",
         update_period=0.1,
@@ -187,6 +186,70 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
             shutil.move(candidate_path, champion_path)
             return False
 
+#     def _get_rewards(self) -> torch.Tensor:
+#         # Refresh the intermediate values after the physics steps
+#         self._compute_intermediate_values()
+# 
+#         d = torch.stack(
+#             [torch.norm(self.current_finger_pos[finger] - self.target_finger_pos[finger], # dim=-1) for finger in self.current_finger_pos.keys()], dim=-1
+#         ).mean(dim=-1)
+#         dist_reward = 1.0 / (1.0 + d**2)
+#         dist_reward = dist_reward * dist_reward * self.cfg.dist_reward_scale
+# 
+#         # check grasp stability
+#         vel = torch.norm(self.hand2obj["lin_vel"], dim=-1)
+#         ang_vel = torch.norm(self.hand2obj["ang_vel"], dim=-1)
+#         vel_penalty = - (vel * self.cfg.vel_penalty_scale + ang_vel * self.cfg.# angvel_penalty_scale)
+# 
+#         obj_z_pos_reward = torch.clamp(self.obj_pos[:, 2] - self._obj_scales[:, 2], min=0.# 0) * self.cfg.z_pos_reward_scale
+# 
+#         # contact forces
+#         is_contact = torch.max(torch.norm(self.net_contact_forces, dim=-1), dim=1)[0] > 1.0
+#         contacts_reward = torch.sum(is_contact, dim=1) * self.cfg.contact_reward_scale
+# 
+#         # grasp is success if the object is not moving with respect to the hand in the # process of picking
+#         is_grasped = torch.logical_and(vel < 0.1, self.reference_traj_info.pick_flg)
+# 
+#         self.is_grasped_buf[:] = is_grasped
+#         self.relation_between_obj_and_hand[:] = torch.norm(self.hand2obj["pos"], dim=-1)
+# 
+#         grasp_success_bonus = torch.where(
+#             is_grasped,
+#             torch.ones_like(dist_reward) * self.cfg.grasp_reward_scale,
+#             torch.zeros_like(dist_reward)
+#         )
+# 
+#         # rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + # contacts_reward
+#         rewards = dist_reward + vel_penalty + obj_z_pos_reward
+#         rewards_wo_bonus = rewards.clone()
+#         # if self.champion_indices has an index of 1, give it a bonus
+#         if torch.any(self.champion_indices == 1):
+#             index_to_bonus = torch.where(self.champion_indices == 1)[0]
+#             rewards[index_to_bonus] += 100.0
+#             print(f"Bonus applied to envs: {index_to_bonus.tolist()}")
+#             # flash the self.champion_indices
+#             self.champion_indices[index_to_bonus] = 0
+#             assert torch.all(self.champion_indices[index_to_bonus] == 0), f"Champion # indices should be reset to 0, but got {self.champion_indices[index_to_bonus]}"
+# 
+#         # print(f"rewards: {rewards}")
+#         def safe_mean(x, mask=None):
+#             if mask is not None:
+#                 return safe_mean(x[mask])
+#             if isinstance(x, torch.Tensor) and x.numel() > 0:
+#                 return x.float().mean().item()
+#             return x if isinstance(x, (int, float)) else 0.0
+# 
+#         self.extras["log"] = {
+#             "rewards": safe_mean(rewards),
+#             "rewards_wo_bonus": safe_mean(rewards_wo_bonus),
+#             "dist_reward": safe_mean(dist_reward),
+#             "grasp_reward": safe_mean(grasp_success_bonus),
+#             "vel_penalty": safe_mean(vel_penalty),
+#             "num_grasped": safe_mean(is_grasped, mask=self.reference_traj_info.pick_flg),
+#             "z_pos_reward": safe_mean(obj_z_pos_reward),
+#             "contacts_reward": safe_mean(contacts_reward),
+#         }
+#         return rewards
     def _get_rewards(self) -> torch.Tensor:
         # Refresh the intermediate values after the physics steps
         self._compute_intermediate_values()
@@ -198,40 +261,41 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
         dist_reward = dist_reward * dist_reward * self.cfg.dist_reward_scale
 
         # check grasp stability
-        vel = torch.norm(self.hand2obj["lin_vel"], dim=-1)
-        ang_vel = torch.norm(self.hand2obj["ang_vel"], dim=-1)
+        vel = torch.norm(self._obj.data.root_lin_vel_w, dim=-1)
+        ang_vel = torch.norm(self._obj.data.root_ang_vel_w, dim=-1)
         vel_penalty = - (vel * self.cfg.vel_penalty_scale + ang_vel * self.cfg.angvel_penalty_scale)
+        vel_penalty = torch.where(~self.reference_traj_info.pick_flg, vel_penalty, torch.zeros_like(vel_penalty))
 
-        obj_z_pos_reward = torch.clamp(self.obj_pos[:, 2] - self._obj_scales[:, 2], min=0.0) * self.cfg.z_pos_reward_scale
-
-        # contact forces
-        is_contact = torch.max(torch.norm(self.net_contact_forces, dim=-1), dim=1)[0] > 1.0
-        contacts_reward = torch.sum(is_contact, dim=1) * self.cfg.contact_reward_scale
-
-        # grasp is success if the object is not moving with respect to the hand in the process of picking
-        is_grasped = torch.logical_and(vel < 0.1, self.reference_traj_info.pick_flg)
-
-        self.is_grasped_buf[:] = is_grasped
-        self.relation_between_obj_and_hand[:] = torch.norm(self.hand2obj["pos"], dim=-1)
-
-        grasp_success_bonus = torch.where(
-            is_grasped,
-            torch.ones_like(dist_reward) * self.cfg.grasp_reward_scale,
-            torch.zeros_like(dist_reward)
+        obj_z_pos = torch.clamp(self.obj_pos[:, 2] - self.cfg.table_height - self._obj_scales[:, 2], min=0.0)
+        obj_z_pos_reward = torch.where(
+            self.reference_traj_info.pick_flg,
+            obj_z_pos * self.cfg.z_pos_reward_scale,
+            torch.zeros_like(obj_z_pos)
         )
 
-        # rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward
-        rewards = dist_reward + vel_penalty + obj_z_pos_reward
-        rewards_wo_bonus = rewards.clone()
-        # if self.champion_indices has an index of 1, give it a bonus
-        if torch.any(self.champion_indices == 1):
-            index_to_bonus = torch.where(self.champion_indices == 1)[0]
-            rewards[index_to_bonus] += 100.0
-            print(f"Bonus applied to envs: {index_to_bonus.tolist()}")
-            # flash the self.champion_indices
-            self.champion_indices[index_to_bonus] = 0
-            assert torch.all(self.champion_indices[index_to_bonus] == 0), f"Champion indices should be reset to 0, but got {self.champion_indices[index_to_bonus]}"
+        # contact forces
+        if self.net_contact_forces is not None:
+            is_contact = torch.max(torch.norm(self.net_contact_forces, dim=-1), dim=1)[0] > 1.0
+        else:
+            is_contact = torch.zeros((self.num_envs, 1), device=self.device, dtype=torch.bool)
+        contacts_reward = torch.sum(is_contact, dim=1) * self.cfg.contact_reward_scale
 
+        rel_vel = torch.norm(self.hand2obj["lin_vel"], dim=-1)
+        # grasp is success if the object is not moving with respect to the hand in the process of picking
+        is_grasped = torch.logical_and(rel_vel < 0.1, self.reference_traj_info.pick_flg)
+        is_grasped_full = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold * 0.8)
+        is_grasped_half =  torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold / 2 * 0.8)
+
+        self.is_grasped_buf[:] = is_grasped_full
+
+
+        grasp_success_bonus = torch.where(
+            is_grasped_full,
+            torch.ones_like(is_grasped_full) * torch.clamp(obj_z_pos / self.cfg.height_bonus_threshold, max=1) * self.cfg.grasp_reward_scale,
+            torch.zeros_like(is_grasped_full)
+        )
+
+        rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward
         # print(f"rewards: {rewards}")
         def safe_mean(x, mask=None):
             if mask is not None:
@@ -240,18 +304,18 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
                 return x.float().mean().item()
             return x if isinstance(x, (int, float)) else 0.0
 
+        self.extras["success"] = is_grasped_full
         self.extras["log"] = {
             "rewards": safe_mean(rewards),
-            "rewards_wo_bonus": safe_mean(rewards_wo_bonus),
             "dist_reward": safe_mean(dist_reward),
             "grasp_reward": safe_mean(grasp_success_bonus),
             "vel_penalty": safe_mean(vel_penalty),
-            "num_grasped": safe_mean(is_grasped, mask=self.reference_traj_info.pick_flg),
-            "z_pos_reward": safe_mean(obj_z_pos_reward),
+            "num_grasped": safe_mean(is_grasped_full, mask=self.reference_traj_info.pick_flg),
+            "num_grasped_half": safe_mean(is_grasped_half, mask=self.reference_traj_info.pick_flg),
+            "z_pos_reward": safe_mean(obj_z_pos_reward, mask=self.reference_traj_info.pick_flg),
             "contacts_reward": safe_mean(contacts_reward),
         }
         return rewards
-
     def _get_observations(self):
         obs = super()._get_observations()
         # print(f"debug1: episode_length_buf: {self.episode_length_buf[0]}, num of self.frames: {len(self.frames[0])}")
@@ -260,6 +324,7 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
             rgb_gpu = self._camera.data.output["rgb"][..., :3]
             rgb_gpu = rgb_gpu.to(torch.uint8)
             for env_id in range(self.num_envs):
-                self.frames[env_id].append(rgb_gpu[env_id].clone())
+                if env_id == 0:
+                    self.frames[env_id].append(rgb_gpu[env_id].clone())
         # print(f"debug3: num of self.frames: {len(self.frames[0])}")
         return obs
