@@ -335,7 +335,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.relation_between_obj_and_hand = torch.zeros(
             self.num_envs, dtype=torch.float32, device=self.device
         )
-        self.frames      = [[] for _ in range(self.num_envs)]
         self.episode_ctr = torch.zeros(self.num_envs, dtype=torch.int32)
         self.champion_indices = torch.zeros(self.num_envs, dtype=torch.int32)
         self.extras["obj_scale"] = self._obj_scales
@@ -628,8 +627,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
             env_ids = self._robot._ALL_INDICES
 
         self._obj.update(self.dt)
-        if not self.cfg.off_camera_sensor:
-            self._camera.update(self.dt)
+        #if not self.cfg.off_camera_sensor:
+        #    self._camera.update(self.dt)
         if not self.cfg.off_contact_sensor:
             self._contact_sensor.update(self.dt)
 
@@ -663,17 +662,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
             self.net_contact_forces = self._contact_sensor.data.net_forces_w_history[:, :, self.force_tip_link_indices]
         else:
             self.net_contact_forces = None
-
-        if not self.cfg.off_camera_sensor:
-            rgb = self._camera.data.output["rgb"].cpu().numpy()      # (N, H, W, 4)
-            rgb = (rgb[..., :3]).astype(np.uint8)              # strip alpha
-            for i in range(self.num_envs):
-                self.frames[i].append(rgb[i])
-            # write a buffer to an image for debugging
-            # print('new frame is added')
-        else:
-            self.frames = None
-
 
     def _get_rewards(self) -> torch.Tensor:
         # Refresh the intermediate values after the physics steps
