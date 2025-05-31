@@ -101,7 +101,7 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1024, env_spacing=env_spacing, replicate_physics=False)
 
     robot_cfg = RobotCfg(robot_name)
-    robot_cfg.init_joint_pos["HEAD_JOINT1"] = 0.32
+    # robot_cfg.init_joint_pos["HEAD_JOINT1"] = 0.32
     robot = robot_cfg.get_articulation_cfg()
     contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*", history_length=1, update_period=0.005, track_air_time=True
