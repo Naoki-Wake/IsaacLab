@@ -98,12 +98,6 @@ def main():
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
 
-    def unwrap_env(env):
-        while hasattr(env, 'env'):
-            env = env.env
-        return env
-    base_env = unwrap_env(env)
-
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv):
         env = multi_agent_to_single_agent(env)
@@ -197,14 +191,12 @@ def main():
             time.sleep(sleep_time)
 
     results = list_of_dict_to_dict_of_list(results)
-    # results["object_scale"] = base_env._obj_scales.cpu().numpy()
-    # results["object_sq_param"] = base_env._obj_sq_params.cpu().numpy()
 
     # close the simulator
     env.close()
 
     # save logs as npz file
-    logs_path = os.path.join(log_dir, "logs.npz")
+    logs_path = os.path.join(log_dir, "logs_test.npz")
     np.savez(logs_path, **results)
     print(f"[INFO] Saved logs to {logs_path}")
 
