@@ -8,7 +8,7 @@ from isaaclab.sensors import CameraCfg, Camera
 from isaaclab.utils import configclass
 from isaaclab.sensors import Camera
 from .nextage_shadow_grasp_env import NextageShadowGraspEnv, NextageShadowGraspEnvCfg
-from isaaclab_tasks.utils.gpt_video_checker_buffer import ask_gpt
+from isaaclab_tasks.utils.gpt_video_checker_progress import ask_gpt
 from isaaclab_tasks.utils.hand_utils import ShadowHandUtils, HondaHandUtils, ReferenceTrajInfo
 import isaaclab.sim as sim_utils
 import numpy as np
@@ -107,8 +107,7 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
     def __init__(self, cfg: NextageShadowGraspVisionEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
         self.frames = [[] for _ in range(self.num_envs)]
-        self.episode_ctr = torch.zeros(self.num_envs, dtype=torch.int32)
-        self.champion_indices = torch.zeros(self.num_envs, dtype=torch.int32)
+        self.gpt_progress = torch.zeros(self.num_envs, dtype=torch.float32)
         self.gpt_ctr = 0
         self.step_in_episode = 0
         self.camera_skip = 1
@@ -134,58 +133,23 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
         if not self.frames[env_id]:
             return
         if is_truncated:
-            print(f"Writing video for env {env_id} with {len(self.frames[env_id])} frames.")
-            fps = int(1.0 / (self.dt * self.camera_skip))
-            ep = int(self.episode_ctr[env_id])
-            output_dir = os.path.join("videos", self.experiment_date)
-            os.makedirs(output_dir, exist_ok=True)
-            path = os.path.join(output_dir, f"env{env_id:04d}_ep{ep:05d}.mp4")
-            H, W, _ = self.frames[env_id][0].shape
-            vw = cv2.VideoWriter(path, fourcc, fps, (W, H))
-            for frame in self.frames[env_id]:
-                # Move to CPU, convert to numpy, then to BGR
-                # if isinstance(frame, torch.Tensor):
-                frame_cpu = frame.cpu().numpy()
-                bgr = cv2.cvtColor(frame_cpu, cv2.COLOR_RGB2BGR)
-                vw.write(bgr)
-
-            vw.release()
-            self.episode_ctr[env_id] += 1
-            champion_path = os.path.join("videos", self.experiment_date, "champion.mp4")
-            result = self._compare_champion(path, champion_path)
-            if result:
-                print(f"[env {env_id}] new champion video saved → {path}")
-                self.champion_indices[env_id] = 1
-        self.frames[env_id].clear()
-
-    def _compare_champion(self, candidate_path, champion_path="videos/champion.mp4"):
-        experiment_dir = os.path.dirname(candidate_path)
-        if os.path.exists(champion_path):
-            candidate_win, reason = ask_gpt(
+            num_frames_to_sample = 3
+            total = len(self.frames[env_id])
+            if total < num_frames_to_sample:
+                num_frames_to_sample = total
+            indices = np.linspace(0, total - 1, num_frames_to_sample, endpoint=True, dtype=int)
+            indices = np.unique(indices)  # avoid duplicates in short videos
+            sampled_frames = [self.frames[env_id][i].cpu().numpy() for i in indices]
+            progress = ask_gpt(
                 candidate_path,
-                champion_path,
-                "grasp and pick up the object",
                 creds_path="source/isaaclab_tasks/isaaclab_tasks/utils/auth.env",
-                num_frames=5,
-            )
-            self.gpt_ctr += 1
-            if candidate_win:
-                existing = glob.glob(os.path.join(experiment_dir,"*_champion.mp4"))
-                indices = [int(os.path.basename(p).split("_")[0]) for p in existing if os.path.basename(p).split("_")[0].isdigit()]
-                archive_index = max(indices, default=-1) + 1
-                archived_path = os.path.join(experiment_dir,f"{archive_index}_champion.mp4")
-                shutil.move(champion_path, archived_path)
-                with open(os.path.join(experiment_dir,f"{archive_index}_reason.txt"), "w") as f:
-                    f.write(reason + f" (GPTcount-{self.gpt_ctr})")
-                shutil.move(candidate_path, champion_path)
-                return True
-            else:
-                os.remove(candidate_path)
-                return False
+                sampled_frames,
+            )     
+            self.gpt_progress[env_id] = progress
         else:
-            shutil.move(candidate_path, champion_path)
-            return False
-
+            self.gpt_progress[env_id] = 0.0
+        self.frames[env_id].clear()
+        
 #     def _get_rewards(self) -> torch.Tensor:
 #         # Refresh the intermediate values after the physics steps
 #         self._compute_intermediate_values()
@@ -296,7 +260,17 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
         )
 
         rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward
-        # print(f"rewards: {rewards}")
+        rewards_wo_bonus = rewards.clone()
+
+        # if self.champion_indices has an index of 1, give it a bonu
+        progress_coefficient = 100
+        # add progress_coefficient*gpt_progress if nonzero
+        for env_id in range(self.num_envs):
+            additional_bonus = progress_coefficient * self.gpt_progress[env_id]
+            if additional_bonus > 0:
+                rewards[env_id] += additional_bonus
+                print(f"Bonus applied to env {env_id}: {additional_bonus:.2f}")
+        # flash the self.champion_indices
         def safe_mean(x, mask=None):
             if mask is not None:
                 return safe_mean(x[mask])
@@ -307,6 +281,7 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
         self.extras["success"] = is_grasped_full
         self.extras["log"] = {
             "rewards": safe_mean(rewards),
+            "rewards_wo_bonus": safe_mean(rewards_wo_bonus),
             "dist_reward": safe_mean(dist_reward),
             "grasp_reward": safe_mean(grasp_success_bonus),
             "vel_penalty": safe_mean(vel_penalty),

@@ -159,7 +159,7 @@ def query_vlm(client, client_params: dict, prompt_content: list[dict]) -> dict:
 def ask_gpt(
     ask_video: str,
     creds_path: str,
-    num_frames: int
+    frames_candidate: list[np.ndarray],
 ) -> float:
     """
     Sample frames from both videos, query GPT, and return True if 'first' wins.
@@ -167,9 +167,6 @@ def ask_gpt(
     creds = load_credentials(creds_path)
     client, params = init_vlm_client(creds)
 
-    frames_candidate = sample_frames(ask_video, num_frames)
-    print(f"loaded ask_video from {ask_video}")
-    
     prompt_content = build_prompt_content(frames_candidate)
     result = query_vlm(client, params, prompt_content)
     # print(result)
@@ -190,10 +187,11 @@ def main():
     parser.add_argument("--ask", default="ask_video.mp4", help="Video A path.")
     args = parser.parse_args()
 
+    frames_candidate = sample_frames(args.ask, args.num_frames)
     progress = ask_gpt(
         args.ask,
         args.creds,
-        args.num_frames
+        frames_candidate
     )
     print(f"Video progress stage: {progress}")
 
