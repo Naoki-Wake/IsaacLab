@@ -29,7 +29,7 @@ from isaaclab.assets import RigidObject, RigidObjectCfg
 
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.controllers import DifferentialIKController, DifferentialIKControllerCfg
-from isaaclab.utils.math import subtract_frame_transforms, quat_error_magnitude
+from isaaclab.utils.math import subtract_frame_transforms, quat_error_magnitude, euler_xyz_from_quat, quat_mul, quat_conjugate
 
 from isaaclab_tasks.utils.hand_utils import ShadowHandUtils, HondaHandUtils, ReferenceTrajInfo
 from isaaclab_tasks.utils.compute_relative_state import compute_object_state_in_hand_frame
@@ -86,6 +86,7 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
         ),
     )
 
+    is_data_collection: bool = False  # Set to True for data collection mode
     # robot
     robot_name = "shadow" # or "nextage-shadow" or "shadow"
     env_spacing = 1.5
@@ -289,14 +290,14 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.is_training = self.cfg.is_training
 
         # when testing, increase the length of pick-up just for visualization purpose
-        if not self.is_training:
+        if not self.is_training and not self.cfg.is_data_collection:
             self.cfg.episode_length_s *= 2
 
         self.reference_traj_info = ReferenceTrajInfo(
             self.num_envs, self.device,
             finger_coupling_rule=self.hand_util.couplingRuleTensor,
             n_hand_joints=len(self.hand_util.hand_full_joint_names),
-            is_training=self.is_training,
+            eval_mode=not self.is_training and not self.cfg.is_data_collection,
             pick_height=self.cfg.height_bonus_threshold
         )
 
@@ -308,10 +309,16 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.camera_data_types = self.robot_cfg.camera_data_types
         if self.robot_cfg.compute_pointcloud:
             self.camera_data_types.append("pointcloud")
-        self.frames = {
-            key: [[] for _ in range(self.num_envs)]
-            for key in self.camera_data_types
-        }
+
+        self.store_frames = False
+        if self.store_frames:
+            self.frames = {
+                key: [[] for _ in range(self.num_envs)]
+                for key in self.camera_data_types
+            }
+        else:
+            self.frames = {key : None for key in self.camera_data_types}
+
         self.extras["obj_scale"] = self._obj_scales
         self.extras["obj_sq_params"] = self._obj_sq_params
 
@@ -330,25 +337,53 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
             if key == "pointcloud":
                 N, H, W, _ = frame.shape
-                pc = torch.inf * torch.ones((N, H*W, 3), device=self.device)  # (N, H, W, 3)
+                n_sampled_points = (H * W) // 4  # Sampled points
+                pc = torch.zeros((N, n_sampled_points, 3), device=self.device)
                 for env_id in env_ids:
-                    # if env_id == 0: import pdb; pdb.set_trace()
-                    _pc = self.get_pointcloud(
+                    _pc = self._get_pointcloud(
                         frame[env_id],
                         cam_pos=self._camera.data.pos_w[env_id],
                         cam_quat=self._camera.data.quat_w_ros[env_id],
-                        intrinsic_matrix=self._camera.data.intrinsic_matrices[env_id]
+                        intrinsic_matrix=self._camera.data.intrinsic_matrices[env_id],
+                        n_sampled_points=n_sampled_points
                     )
-                    pc[env_id, :len(_pc)] = _pc
+                    pc[env_id, :] = _pc
                 frame = pc  # (N, H*W, 3)
             frame_cpu = frame.contiguous().clone().cpu().numpy()   # deep-copy → CPU
 
-            for env_id in env_ids:
-                self.frames[key][env_id].append(frame_cpu[env_id])
+            if self.store_frames:
+                for env_id in env_ids:
+                    self.frames[key][env_id].append(frame_cpu[env_id])
+            else:
+                self.frames[key] = frame_cpu
 
         return self.frames
 
-    def get_pointcloud(self, depth, cam_pos, cam_quat, intrinsic_matrix):
+    def _reset_frames(self, env_ids: torch.Tensor | None = None):
+        """Reset the frames for the specified environments."""
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
+
+        for key in self.camera_data_types:
+            if self.store_frames:
+                for env_id in env_ids:
+                    self.frames[key][env_id] = []
+
+
+    def _get_frames(self, env_ids: torch.Tensor | None = None):
+        """Get the captured frames for the specified environments."""
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
+
+        frames = {}
+        for key in self.camera_data_types:
+            if self.store_frames:
+                frames[key] = [self.frames[key][env_id] for env_id in env_ids]
+            else:
+                frames[key] = self.frames[key][env_ids.cpu().numpy()]
+        return frames
+
+    def _get_pointcloud(self, depth, cam_pos, cam_quat, intrinsic_matrix, n_sampled_points=None):
         pointcloud = create_pointcloud_from_depth(
             intrinsic_matrix=intrinsic_matrix,
             depth=depth,
@@ -356,21 +391,11 @@ class NextageShadowGraspEnv(DirectRLEnv):
             orientation=cam_quat,
             device=self.device,
         )
-        return pointcloud
-
-
-    # def _capture_depth_frame(self, env_ids: torch.Tensor | None = None):
-    #     if env_ids is None:
-    #         env_ids = torch.arange(self.num_envs, device=self.device)
-
-    #     depth = self._camera.data.output["depth"]
-    #     if depth.shape[0] == 0:
-    #         return
-    #     depth = (depth * 255).to(torch.uint8)  # Scale depth to 0-255
-    #     depth_cpu = depth.contiguous().clone().cpu().numpy()  # deep-copy → CPU
-    #     for env_id in env_ids:
-    #         self.frames[env_id].append(depth_cpu[env_id])
-    #     return self.frames["depth"]
+        if n_sampled_points is None:
+            n_sampled_points = pointcloud.shape[0]  # Use all points
+        idx = torch.randperm(pointcloud.shape[0], device=self.device)[:n_sampled_points]
+        pointcloud = pointcloud[idx]  # Sampled points
+        return pointcloud.to(torch.float32)
 
     def _find_all_indices(self, joint_names, mode="link"):
         """Find all indices of joints matching the given names."""
@@ -514,7 +539,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         ### Arm
         timestep_ratio = (self.episode_length_buf / (self.max_episode_length - 1))[env_slice]
         cur_eef_pos, cur_eef_rot = self._get_current_eef_pose()
-        ik_target_pos, ik_target_rot, finger_targets = self.reference_traj_info.get(
+        self.ik_target_pos, self.ik_target_rot, self.finger_targets = self.reference_traj_info.get(
             env_slice, timestep_ratio,
             current_handP_world=cur_eef_pos[env_slice],
             current_handQ_world=cur_eef_rot[env_slice],
@@ -523,13 +548,13 @@ class NextageShadowGraspEnv(DirectRLEnv):
             action_handQ=None,
             action_hand_joint=self.actions[env_slice, len(self.arm_indices):-1] * self.action_scale[None, len(self.arm_indices):-1],
         )
-        arm_targets, self.ik_fail = self._solve_ik(env_slice, ik_target_pos, ik_target_rot)
+        arm_targets, self.ik_fail = self._solve_ik(env_slice, self.ik_target_pos, self.ik_target_rot)
 
         ### Fingers
         # finger_targets = finger_targets + ~self.reference_traj_info.pick_flg[env_slice, None] * self.actions[env_slice, len(self.arm_indices):-1] * self.action_scale[None, len(self.arm_indices):-1]
 
         self.robot_dof_targets[env_slice, self.arm_indices] = torch.clamp(arm_targets, self.robot_dof_lower_limits[self.arm_indices], self.robot_dof_upper_limits[self.arm_indices])
-        self.robot_dof_targets[env_slice, self.hand_full_indices] = finger_targets # torch.clamp(finger_targets, self.robot_dof_lower_limits[self.hand_full_indices], self.robot_dof_upper_limits[self.hand_full_indices])
+        self.robot_dof_targets[env_slice, self.hand_full_indices] = self.finger_targets # torch.clamp(finger_targets, self.robot_dof_lower_limits[self.hand_full_indices], self.robot_dof_upper_limits[self.hand_full_indices])
 
     def _get_current_eef_pose(self):
         # Get the current end-effector pose
@@ -563,9 +588,9 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
     def _reset_idx(self, env_ids: torch.Tensor | None):
         super()._reset_idx(env_ids)
-        # robot state with increased randomization
-
         # Get environment origins for the selected envs
+        self._reset_frames(env_ids)
+
         env_origins = self.scene.env_origins[env_ids]
 
         self._obj_scales[env_ids] = self._get_obj_scale(get_current_stage(), env_ids=env_ids)
@@ -576,7 +601,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         # Add random variance to the obj's position with increased randomness
         num_envs_to_reset = len(env_ids) if env_ids is not None else self.num_envs
-        position_variance = torch.rand((num_envs_to_reset, 3), device=self.device) * 0.04 - 0.02  # Increased variance range [-0.02, 0.02]
+        # position_variance = torch.rand((num_envs_to_reset, 3), device=self.device) * 0.04 - 0.02  # Increased variance range [-0.02, 0.02]
         obj_pos = env_origins + obj_offset # + position_variance  # shape: (len(env_ids), 3)
 
         # Add some random rotation to the obj
@@ -642,18 +667,14 @@ class NextageShadowGraspEnv(DirectRLEnv):
             - 1.0
         )
         finger_effort = self.robot_dof_targets[:, self.hand_full_indices] - self._robot.data.joint_pos[:, self.hand_full_indices]
-        # to_target = self.obj_pos - self.robot_grasp_pos
 
-        hand_pos, hand_rot = self._get_current_eef_pose()
         obs = torch.cat(
             (
+                self.hand2obj["pos"],
+                torch.stack(euler_xyz_from_quat(self.hand2obj["quat"]), dim=-1),
                 dof_pos_scaled,
-                hand_pos,
-                hand_rot,
                 *diff_finger,
                 finger_effort,
-                self.obj_pos,
-                self.obj_rot,
                 self.actions,
             ),
             dim=-1,
@@ -661,7 +682,36 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         if not self.robot_cfg.off_camera_sensor:
             self._capture_frame()
+            self.extras["frames"] = self._get_frames()
+
+        # used for Diffusion Policy
+        if self.cfg.is_data_collection:
+            hand_pos, hand_rot = self._get_current_eef_pose()
+            self.extras["dp_ref"] = self._get_dp_ref(hand_pos, hand_rot)
+            self._prev_hand_pos, self._prev_hand_rot = hand_pos, hand_rot
+
         return {"policy": torch.clamp(obs, -5.0, 5.0)}
+
+    def _get_dp_ref(self, hand_pos, hand_rot):
+        # Compute the reference for the Diffusion Policy
+        dp_ref = {}
+        if hasattr(self, "finger_targets"):
+            finger_js = self.finger_targets
+        else:
+            finger_js = self._robot.data.joint_pos[:, self.hand_full_indices]
+
+        if hasattr(self, "_prev_hand_pos") and hasattr(self, "_prev_hand_rot"):
+            delta_hand_pos = hand_pos - self._prev_hand_pos
+            delta_hand_rot = quat_mul(quat_conjugate(self._prev_hand_rot), hand_rot)
+            delta_hand_rot_rpy = torch.stack(euler_xyz_from_quat(delta_hand_rot), dim=-1)
+            dp_ref.update(
+                delta_eef_pos=delta_hand_pos, delta_eef_rot=delta_hand_rot_rpy,
+            )
+        else:
+            delta_hand_pos, delta_hand_rot = None, None
+        return dict(delta_eef_pos=delta_hand_pos, delta_eef_rot=delta_hand_rot, finger_js=finger_js)
+
+
 
     def _compute_intermediate_values(self, env_ids: torch.Tensor | None = None):
         if env_ids is None:
@@ -703,11 +753,11 @@ class NextageShadowGraspEnv(DirectRLEnv):
             self.net_contact_forces = self._contact_sensor.data.net_forces_w_history[:, :, self.force_tip_link_indices]
             # self.contact_normal = self._contact_sensor.data.normal_w[:, :, self.force_tip_link_indices]  # (N, T, 4, 3)
             self.contact_position = self._robot.data.body_pos_w[:, self.position_tip_link_indices]
-            self.visualize_contact_forces_as_arrows(
-                positions=self.contact_position,  # (N, 4, 3)
-                forces=self.net_contact_forces[:, 0],  # Use the first time step for visualization
-                scale=1.0
-            )
+            # self.visualize_contact_forces_as_arrows(
+            #     positions=self.contact_position,  # (N, 4, 3)
+            #     forces=self.net_contact_forces[:, 0],  # Use the first time step for visualization
+            #     scale=1.0
+            # )
         else:
             self.net_contact_forces = None
             self.contact_position = torch.zeros((self.num_envs, 4, 3), device=self.device)
@@ -735,6 +785,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
                 quat = np.roll(q_xyzw, 1)  # convert to (w, x, y, z)
             quats.append(quat)
 
+        quats = np.array(quats, dtype=np.float32)  # (B*K, 4)
         return torch.tensor(quats, dtype=torch.float32).reshape(B, K, 4)
 
     def visualize_contact_forces_as_arrows(
@@ -798,7 +849,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         vel_penalty = - (vel * self.cfg.vel_penalty_scale + ang_vel * self.cfg.angvel_penalty_scale)
         vel_penalty = torch.where(~self.reference_traj_info.pick_flg, vel_penalty, torch.zeros_like(vel_penalty))
 
-        obj_rot_penalty = self.cfg.obj_rot_penalty_scale * quat_error_magnitude(self.obj_initial_rot, self.obj_rot)
+        obj_rot_penalty = -self.cfg.obj_rot_penalty_scale * quat_error_magnitude(self.obj_initial_rot, self.obj_rot)
 
         obj_z_pos = torch.clamp(self.obj_pos[:, 2] - self.cfg.table_height - self._obj_scales[:, 2], min=0.0)
         obj_z_pos_reward = torch.where(
@@ -828,7 +879,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
             torch.zeros_like(is_grasped_full)
         )
 
-        rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward
+        rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward + obj_rot_penalty
 
         # print(f"rewards: {rewards}")
         def safe_mean(x, mask=None):

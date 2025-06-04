@@ -6,7 +6,11 @@
 """Script to train RL agent with RSL-RL."""
 
 """Launch Isaac Sim Simulator first."""
-
+try:
+    from set_debugger import set_debugger; set_debugger()
+except ImportError:
+    # set_debugger is not available, continue without it
+    pass
 import argparse
 import sys
 

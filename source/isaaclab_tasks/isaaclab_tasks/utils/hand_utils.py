@@ -14,7 +14,7 @@ THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class ReferenceTrajInfo:
-    def __init__(self, num_envs, device, finger_coupling_rule: callable, n_hand_joints: int, is_training: bool, pick_height:float=0.05):
+    def __init__(self, num_envs, device, finger_coupling_rule: callable, n_hand_joints: int, eval_mode: bool, pick_height:float=0.05):
         # placeholder for the reference trajectory
         self.num_envs = num_envs
         self.device = device
@@ -29,13 +29,13 @@ class ReferenceTrajInfo:
 
         # The ratio of the total timestep used for end-effector and finger motion.
 
-        if is_training:
+        if eval_mode:
             self.subtasks_span = {
-                "approach": [0.0, 0.6], "grasp": [0.6, 0.9], "pick": [0.9, 1.0],
+                "approach": [0.0, 0.3], "grasp": [0.3, 0.45], "pick": [0.45, 1.0],
             }
         else:
             self.subtasks_span = {
-                "approach": [0.0, 0.3], "grasp": [0.3, 0.45], "pick": [0.45, 1.0],
+                "approach": [0.0, 0.6], "grasp": [0.6, 0.9], "pick": [0.9, 1.0],
             }
         self._pick_diff = torch.tensor([0., 0., pick_height], device=self.device).unsqueeze(0)
         self.finger_couping_rule = finger_coupling_rule

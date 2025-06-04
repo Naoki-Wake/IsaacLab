@@ -12,7 +12,7 @@ DEG_TO_RAD = math.pi / 180
 class RobotCfg():
     def __init__(self, grasp_type: str = "active", is_training: bool = True):
         self.action_space = 6 + self.n_finger_joint + 1 # [x, y, z, roll, pitch, yaw] + [n_finger_joint joints] + [terminate]
-        self.action_scale = [0.01, 0.01, 0.01] + [5.0 * DEG_TO_RAD] * 3  + [10.0 * DEG_TO_RAD] * self.n_finger_joint + [1.0]
+        self.action_scale = [0.01, 0.01, 0.01] + [5.0 * DEG_TO_RAD] * 3  + [20.0 * DEG_TO_RAD] * self.n_finger_joint + [1.0]
         self.contact_sensor: ContactSensorCfg = ContactSensorCfg(
             prim_path="/World/envs/env_.*/Robot/.*",
             history_length=1,
@@ -119,9 +119,9 @@ class ShadowRobotCfg(RobotCfg):
         self.hand_util = ShadowHandUtils(grasp_type=grasp_type)
         self.off_camera_sensor = True
         self.off_contact_sensor = False
-        self.camera_data_types = ["rgb", "depth", "semantic_segmentation", "normals"]
+        self.camera_data_types = ["rgb", "depth", "semantic_segmentation"] # , "normals"]
         self.compute_pointcloud = True
-        # if not is_training: self.off_camera_sensor = False
+        if not is_training: self.off_camera_sensor = False
         self.camera = CameraCfg(
             prim_path="/World/envs/env_.*/camera",
             update_period=0.1,

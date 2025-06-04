@@ -41,8 +41,8 @@ cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 # always enable cameras to record video
-if args_cli.video:
-    args_cli.enable_cameras = True
+# if args_cli.video:
+args_cli.enable_cameras = True
 
 # launch omniverse app
 app_launcher = AppLauncher(args_cli)
@@ -54,6 +54,10 @@ import gymnasium as gym
 import os
 import time
 import torch
+import shutil
+import pathlib
+from datetime import datetime
+from collections import defaultdict
 
 from rsl_rl.runners import OnPolicyRunner
 
@@ -61,11 +65,13 @@ from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
 from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
-
+from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
+
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 
 # PLACEHOLDER: Extension template (do not remove this comment)
 
@@ -77,6 +83,7 @@ def main():
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
     env_cfg.is_training = False
+    env_cfg.is_data_collection = True
     # env_cfg.off_camera_sensor = False
     env_cfg.robot_name = "shadow"
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
@@ -99,12 +106,7 @@ def main():
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
-
-    def unwrap_env(env):
-        while hasattr(env, 'env'):
-            env = env.env
-        return env
-    base_env = unwrap_env(env)
+    base_env: DirectRLEnv = env.unwrapped
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv):
@@ -151,18 +153,30 @@ def main():
 
     dt = env.unwrapped.step_dt
 
-    # reset environment
-    obs, extras = env.get_observations()
+    # reset environmen
+    #
+    obs, _ = env.get_observations()
+    # changed to obtain extras data.
     timestep = 0
     # simulate environment
 
     def tensor_to_numpy(tensor):
         if isinstance(tensor, dict):
             return {k: tensor_to_numpy(v) for k, v in tensor.items()}
-        if isinstance(tensor, list):
+        elif isinstance(tensor, list):
             return np.array([tensor_to_numpy(t) for t in tensor])
-        if isinstance(tensor, torch.Tensor):
-            return tensor.cpu().numpy()
+        elif isinstance(tensor, torch.Tensor):
+            # check invalid tensor
+            if torch.isnan(tensor).any() or torch.isinf(tensor).any():
+                raise ValueError("Tensor contains NaN or Inf values.")
+            tensor = tensor.cpu().numpy()
+
+        if isinstance(tensor, np.ndarray):
+            # replace inf to large number
+            tensor = np.nan_to_num(tensor, nan=0.0, posinf=1e6, neginf=-1e6)
+            # check invalid numpy array
+            if np.isnan(tensor).any() or np.isinf(tensor).any():
+                raise ValueError("Numpy array contains NaN or Inf values.")
         return tensor
 
     def list_of_dict_to_dict_of_list(list_of_dicts):
@@ -173,6 +187,71 @@ def main():
         return dict(result)
 
     results: list = []
+    data_collect_for_dp = True
+    if data_collect_for_dp:
+        action_space = base_env.cfg.action_space
+        n_finger_joints = base_env.robot_cfg.n_finger_joint
+        H, W = base_env.robot_cfg.camera.height, base_env.robot_cfg.camera.width
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        REPO_NAME = f"{base_env.cfg.robot_name}-grasp" # -{timestamp}"
+        output_path = pathlib.Path("./data", REPO_NAME)
+        if output_path.exists():
+            shutil.rmtree(output_path)
+
+        dataset = LeRobotDataset.create(
+            repo_id=REPO_NAME,
+            robot_type=base_env.cfg.robot_name,
+            root=output_path,
+            fps=10,
+            features={
+                "image": {
+                    "dtype": "image",
+                    "shape": (H, W, 3),
+                    "names": ["height", "width", "channel"],
+                },
+                "depth": {
+                    "dtype": "float32",
+                    "shape": (H, W, 1),
+                    "names": ["height", "width", "channel"],
+                },
+                "segmentation": {
+                    "dtype": "uint8",
+                    "shape": (H, W, 1),
+                    "names": ["height", "width", "channel"],
+                },
+                "pointcloud": {
+                    "dtype": "float32",
+                    "shape": ((H * W) // 4, 3),
+                    "names": ["n_points", "channel"],
+                },
+                "state": {
+                    "dtype": "float32",
+                    "shape": (n_finger_joints, ),
+                    "names": ["state"],
+                },
+                "actions": {
+                    "dtype": "float32",
+                    "shape": (action_space,),
+                    "names": ["actions"],
+                },
+            },
+            image_writer_threads=0,
+            image_writer_processes=0,
+        )
+
+        extras = base_env.extras.copy()
+        finger_js_prev = extras["dp_ref"]["finger_js"]
+        prev_frames = extras["frames"]
+        dp_data_buf = dict(
+            state=[[] for _ in range(args_cli.num_envs)],
+            actions=[[] for _ in range(args_cli.num_envs)],
+            image=[[] for _ in range(args_cli.num_envs)],
+            depth=[[] for _ in range(args_cli.num_envs)],
+            segmentation=[[] for _ in range(args_cli.num_envs)],
+            pointcloud=[[] for _ in range(args_cli.num_envs)],
+        )
+
     while simulation_app.is_running():
         start_time = time.time()
         # run everything in inference mode
@@ -183,15 +262,58 @@ def main():
             # env stepping
             obs, rewards, dones, extras = env.step(actions)
             res.update(dict(rewards=rewards, dones=dones))
+            frames = extras.pop("frames", None)
             res.update(extras)
             res = tensor_to_numpy(res)
-            results.append(res)
+            # results.append(res)
+            if data_collect_for_dp:
+                dp_ref = extras["dp_ref"]
+                delta_eef_pos, delta_eef_rot, finger_js = dp_ref["delta_eef_pos"], dp_ref["delta_eef_rot"], dp_ref["finger_js"]
+                _dp_actions = torch.cat(
+                    [delta_eef_pos, delta_eef_rot, finger_js, dones[:, None]], dim=-1,
+                )
+                _dp_state = finger_js_prev
+                _dp_data_buf_step = dict(
+                    state=_dp_state,
+                    actions=_dp_actions,
+                    image=prev_frames["rgb"],
+                    pointcloud=prev_frames["pointcloud"].astype(np.float32),
+                    segmentation=prev_frames["semantic_segmentation"].astype(np.uint8),
+                    depth=prev_frames["depth"],
+                )
+                _dp_data_buf_step: dict = tensor_to_numpy(_dp_data_buf_step)
+                for key in _dp_data_buf_step.keys():
+                    for env_id in range(args_cli.num_envs):
+                        dp_data_buf[key][env_id].append(_dp_data_buf_step[key][env_id])
 
-        if args_cli.video:
-            timestep += 1
-            # Exit the play loop after recording one video
-            if timestep == args_cli.video_length:
-                break
+                finger_js_prev = finger_js
+                prev_frames = frames
+
+        done_envs = torch.nonzero(dones).squeeze(-1)
+        if done_envs.numel() > 0:
+            # for each fiished env, store dataset
+            for env_id in done_envs:
+                for step in range(len(dp_data_buf["actions"][env_id])):
+                    dp_data = dict(
+                        state=dp_data_buf["state"][env_id][step],
+                        actions=dp_data_buf["actions"][env_id][step],
+                        image=dp_data_buf["image"][env_id][step],
+                        pointcloud=dp_data_buf["pointcloud"][env_id][step],
+                        segmentation=dp_data_buf["segmentation"][env_id][step],
+                        depth=dp_data_buf["depth"][env_id][step],
+                        task=f"grasp {base_env.cfg.grasp_type}",
+                    )
+                    dataset.add_frame(dp_data)
+                print("[INFO] Added frame to dataset:", env_id, dataset.meta.total_frames, dataset.meta.total_episodes)
+                dataset.save_episode()
+
+            # reset the data buffer for the finished environments
+            for env_id in done_envs:
+                for key in dp_data_buf.keys():
+                    dp_data_buf[key][env_id] = []
+
+        if dataset.meta.total_episodes > 30:
+            break
 
         # time delay for real-time evaluation
         sleep_time = dt - (time.time() - start_time)
@@ -199,7 +321,6 @@ def main():
             time.sleep(sleep_time)
 
     results_dict: dict = list_of_dict_to_dict_of_list(results)
-    results_dict.update(base_env.frames)
     # close the simulator
     env.close()
 
