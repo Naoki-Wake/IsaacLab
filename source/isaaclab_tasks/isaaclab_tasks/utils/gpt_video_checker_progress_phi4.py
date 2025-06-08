@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import time
+import requests
 
 import cv2
 import numpy as np
@@ -12,41 +13,7 @@ try:
 except ImportError:
     dotenv_values = lambda f: os.environ
 
-from openai import OpenAI, AzureOpenAI
-import openai
 import re
-
-# compare two videos using GPT-4 Vision
-def load_credentials(env_file: str) -> dict:
-    """
-    Load credentials from a .env file or environment.
-    """
-    creds = dotenv_values(env_file)
-    required = [
-        "OPENAI_API_KEY",
-        "AZURE_OPENAI_API_KEY",
-        "AZURE_OPENAI_ENDPOINT",
-        "AZURE_OPENAI_DEPLOYMENT_NAME",
-    ]
-    for key in required:
-        creds.setdefault(key, os.getenv(key, ""))
-    return creds
-
-
-def init_vlm_client(creds: dict):
-    """
-    Initialize the GPT-4 Vision client for Azure or OpenAI.
-    """
-    if creds.get("AZURE_OPENAI_API_KEY"):
-        client = AzureOpenAI(
-            api_key=creds["AZURE_OPENAI_API_KEY"],
-            azure_endpoint=creds["AZURE_OPENAI_ENDPOINT"],
-            api_version="2024-02-01"
-        )
-        return client, {"model": creds["AZURE_OPENAI_DEPLOYMENT_NAME"]}
-    client = OpenAI(api_key=creds["OPENAI_API_KEY"])
-    return client, {"model": "gpt-4o"}
-
 
 def sample_frames(video_path: str, num_frames: int) -> list[np.ndarray]:
     """
@@ -128,50 +95,56 @@ def build_prompt_content(
     return content
 
 
-def query_vlm(client, client_params: dict, prompt_content: list[dict]) -> dict:
+def query_vlm(prompt_content: list[dict]) -> dict:
     """
-    Call the Vision LLM with provided content and return parsed JSON.
+    Send image/text prompt_content to a local HTTP server running the VLM.
     """
-    messages = [{"role": "user", "content": prompt_content}]
-    params = {**client_params, "messages": messages, "max_tokens": 50, "temperature": 0.1, "top_p": 0.5}
+    try:
+        # Convert prompt content to a simple dict with images and text parts
+        texts = []
+        images_b64 = []
+        for item in prompt_content:
+            if item["type"] == "text":
+                texts.append(item["text"])
+            elif item["type"] == "image_url":
+                images_b64.append(item["image_url"]["url"])  # base64 encoded image URI
 
-    for attempt in range(5):
-        try:
-            resp = client.chat.completions.create(**params)
-            text = resp.choices[0].message.content
-            m = re.search(r'\{.*?"answer".*?\}', text, re.DOTALL)
-            if not m:
-                raise ValueError(f"Couldn't extract JSON from:\n{text}")
+        payload = {
+            "prompt": "\n".join(texts),
+            "images": images_b64
+        }
 
-            payload = m.group(0)
-            return json.loads(payload)
-        except (openai.RateLimitError, openai.APIStatusError) as e:
-            print(f"API error: {e} (retrying)")
-            time.sleep(1)
-        except Exception as e:
-            print(f"Error: {e} (retrying)")
-            time.sleep(1)
+        response = requests.post("http://10.137.70.15:8000/vlm_query", json=payload, timeout=60)
+        response.raise_for_status()
+        return response.json()
 
-    print(f"Failed after {attempt+1} attempts.")
-    return {}
+    except Exception as e:
+        print(f"Local VLM error: {e}")
+        return {}
 
 
-def ask_gpt(
-    creds_path: str,
+def ask_phi4(
     frames_candidate: list[np.ndarray],
 ) -> float:
     """
     Sample frames from both videos, query GPT, and return True if 'first' wins.
     """
-    creds = load_credentials(creds_path)
-    client, params = init_vlm_client(creds)
 
     prompt_content = build_prompt_content(frames_candidate)
-    result = query_vlm(client, params, prompt_content)
+    result = query_vlm(prompt_content)
     # print(result)
-    answer = result.get("answer", "").lower()
-    # check if the answer is a valid stage
-    if answer not in {"0", "1", "2", "3", "4"}:
+    answer = result.get("raw", "").lower()
+    if '1' in answer:
+        answer = 1
+    elif '2' in answer:
+        answer = 2
+    elif '3' in answer:
+        answer = 3
+    elif '4' in answer:
+        answer = 4
+    elif '0' in answer:
+        answer = 0
+    else:
         print(f"Invalid answer: {answer}. Expected '0', '1', '2', '3', or '4'.")
         return 0.0
     # return success ratio
@@ -181,14 +154,12 @@ def ask_gpt(
 
 def main():
     parser = argparse.ArgumentParser(description="Video progress check via GPT-4 Vision.")
-    parser.add_argument("--creds", default="auth.env", help="Env file path.")
     parser.add_argument("--num_frames", type=int, default=3, help="Frames per video.")
     parser.add_argument("--ask", default="ask_video.mp4", help="Video A path.")
     args = parser.parse_args()
 
     frames_candidate = sample_frames(args.ask, args.num_frames)
-    progress = ask_gpt(
-        args.creds,
+    progress = ask_phi4(
         frames_candidate
     )
     print(f"Video progress stage: {progress}")

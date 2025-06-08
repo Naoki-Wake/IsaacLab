@@ -5,10 +5,11 @@ import cv2
 import shutil
 import glob
 from isaaclab.sensors import CameraCfg, Camera
+from isaaclab.sensors import TiledCameraCfg, TiledCamera
 from isaaclab.utils import configclass
-from isaaclab.sensors import Camera
 from .nextage_shadow_grasp_env import NextageShadowGraspEnv, NextageShadowGraspEnvCfg
 from isaaclab_tasks.utils.gpt_video_checker_progress import ask_gpt
+from isaaclab_tasks.utils.gpt_video_checker_progress_phi4 import ask_phi4
 from isaaclab_tasks.utils.hand_utils import ShadowHandUtils, HondaHandUtils, ReferenceTrajInfo
 import isaaclab.sim as sim_utils
 import numpy as np
@@ -78,18 +79,28 @@ class NextageShadowGraspVisionEnvCfg(NextageShadowGraspEnvCfg):
     grasp_type = "active"  # or "passive"
     hand_util = ShadowHandUtils(grasp_type=grasp_type) if "shadow" in robot_name else HondaHandUtils(grasp_type=grasp_type)
 
-    off_camera_sensor = True
+    off_camera_sensor = False  # if True, no camera sensor will be used, only the robot state will be observed
     camera = CameraCfg(
-        prim_path="/World/envs/env_.*/side_cam",
-        update_period=0.1,
-        height=480,
-        width=640,
-        data_types=["rgb"],
-        spawn=sim_utils.PinholeCameraCfg(
-            focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
-        ),
-        offset=CameraCfg.OffsetCfg(pos=(0.3,0.3,1.0), rot=(0.29,0.24,0.55,0.74), convention="opengl"),
-    )
+         prim_path="/World/envs/env_.*/side_cam",
+         update_period=0.1,
+         height=480,
+         width=640,
+         data_types=["rgb"],
+         spawn=sim_utils.PinholeCameraCfg(
+             focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
+         ),
+         offset=CameraCfg.OffsetCfg(pos=(0.3,0.3,1.0), rot=(0.29,0.24,0.55,0.74), convention="opengl"),
+     )
+    # camera = TiledCameraCfg(
+    #         prim_path="/World/envs/env_.*/side_cam",
+    #         offset=TiledCameraCfg.OffsetCfg(pos=(0.3,0.3,1.0), rot=(0.29,0.24,0.55,0.74), convention="opengl"),
+    #         data_types=["rgb"],
+    #         spawn=sim_utils.PinholeCameraCfg(
+    #             focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
+    #         ),
+    #         height=240,
+    #         width=320,
+    #     )
 
 
 class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
@@ -120,11 +131,11 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
 
         if not self.cfg.off_camera_sensor:
             for env_id in done_envs:
-                if env_id == 0:  # only write video for the first environment
-                    is_truncated = env_id in done_envs_truncated
-                    # print(f"debug: num of frames for env {env_id} is {len(self.frames[env_id])}, is_truncated: {is_truncated}")
-                    self._write_video(env_id, is_truncated)
-                    #print(f"debug: done writing video. num of frames for env {env_id} is {len(self.frames[env_id])}")
+                # if env_id == 0:  # only write video for the first environment
+                is_truncated = env_id in done_envs_truncated
+                # print(f"debug: num of frames for env {env_id} is {len(self.frames[env_id])}, is_truncated: {is_truncated}")
+                self._write_video(env_id, is_truncated)
+                #print(f"debug: done writing video. num of frames for env {env_id} is {len(self.frames[env_id])}")
         return terminated, truncated
 
 
@@ -133,87 +144,44 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
         if not self.frames[env_id]:
             return
         if is_truncated:
-            num_frames_to_sample = 3
+            num_frames_to_sample = 1
             total = len(self.frames[env_id])
-            if total < num_frames_to_sample:
-                num_frames_to_sample = total
-            indices = np.linspace(0, total - 1, num_frames_to_sample, endpoint=True, dtype=int)
-            indices = np.unique(indices)  # avoid duplicates in short videos
+            if num_frames_to_sample == 1:
+                    indices = [total - 1]
+            else:
+                if total < num_frames_to_sample:
+                    num_frames_to_sample = total
+                indices = np.linspace(0, total - 1, num_frames_to_sample, endpoint=True, dtype=int)
+                indices = np.unique(indices)  # avoid duplicates in short videos
             sampled_frames = [self.frames[env_id][i].cpu().numpy() for i in indices]
-            progress = ask_gpt(
-                candidate_path,
-                creds_path="source/isaaclab_tasks/isaaclab_tasks/utils/auth.env",
+            #progress = ask_gpt(
+            #    "source/isaaclab_tasks/isaaclab_tasks/utils/auth.env",
+            #    sampled_frames,
+            #)
+            progress = ask_phi4(
                 sampled_frames,
-            )     
+            )
+            self.gpt_ctr += 1
+            # if progress is high, save the video
+            if progress > 0.9:
+                fps  = int(1.0 / (self.dt * self.camera_skip))
+                if not os.path.exists(f"./videos/{self.experiment_date}"):
+                    os.makedirs(f"./videos/{self.experiment_date}")
+                path = f"./videos/{self.experiment_date}/env{env_id:04d}_counter_{self.gpt_ctr:04d}.mp4"
+
+                H, W, _ = self.frames[env_id][0].shape
+                vw = cv2.VideoWriter(path, fourcc, fps, (W, H))   # open writer
+                print(f"writing {len(self.frames[env_id])} frames to {path}")
+                for f in self.frames[env_id]:
+                    f_cpu = f.cpu().numpy()  # move to CPU and convert to numpy
+                    f_cpu = cv2.cvtColor(f_cpu, cv2.COLOR_RGBA2RGB)  # convert from RGBA to RGB
+                    vw.write(f_cpu)  # write frame
+                vw.release()
             self.gpt_progress[env_id] = progress
         else:
             self.gpt_progress[env_id] = 0.0
         self.frames[env_id].clear()
-        
-#     def _get_rewards(self) -> torch.Tensor:
-#         # Refresh the intermediate values after the physics steps
-#         self._compute_intermediate_values()
-# 
-#         d = torch.stack(
-#             [torch.norm(self.current_finger_pos[finger] - self.target_finger_pos[finger], # dim=-1) for finger in self.current_finger_pos.keys()], dim=-1
-#         ).mean(dim=-1)
-#         dist_reward = 1.0 / (1.0 + d**2)
-#         dist_reward = dist_reward * dist_reward * self.cfg.dist_reward_scale
-# 
-#         # check grasp stability
-#         vel = torch.norm(self.hand2obj["lin_vel"], dim=-1)
-#         ang_vel = torch.norm(self.hand2obj["ang_vel"], dim=-1)
-#         vel_penalty = - (vel * self.cfg.vel_penalty_scale + ang_vel * self.cfg.# angvel_penalty_scale)
-# 
-#         obj_z_pos_reward = torch.clamp(self.obj_pos[:, 2] - self._obj_scales[:, 2], min=0.# 0) * self.cfg.z_pos_reward_scale
-# 
-#         # contact forces
-#         is_contact = torch.max(torch.norm(self.net_contact_forces, dim=-1), dim=1)[0] > 1.0
-#         contacts_reward = torch.sum(is_contact, dim=1) * self.cfg.contact_reward_scale
-# 
-#         # grasp is success if the object is not moving with respect to the hand in the # process of picking
-#         is_grasped = torch.logical_and(vel < 0.1, self.reference_traj_info.pick_flg)
-# 
-#         self.is_grasped_buf[:] = is_grasped
-#         self.relation_between_obj_and_hand[:] = torch.norm(self.hand2obj["pos"], dim=-1)
-# 
-#         grasp_success_bonus = torch.where(
-#             is_grasped,
-#             torch.ones_like(dist_reward) * self.cfg.grasp_reward_scale,
-#             torch.zeros_like(dist_reward)
-#         )
-# 
-#         # rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + # contacts_reward
-#         rewards = dist_reward + vel_penalty + obj_z_pos_reward
-#         rewards_wo_bonus = rewards.clone()
-#         # if self.champion_indices has an index of 1, give it a bonus
-#         if torch.any(self.champion_indices == 1):
-#             index_to_bonus = torch.where(self.champion_indices == 1)[0]
-#             rewards[index_to_bonus] += 100.0
-#             print(f"Bonus applied to envs: {index_to_bonus.tolist()}")
-#             # flash the self.champion_indices
-#             self.champion_indices[index_to_bonus] = 0
-#             assert torch.all(self.champion_indices[index_to_bonus] == 0), f"Champion # indices should be reset to 0, but got {self.champion_indices[index_to_bonus]}"
-# 
-#         # print(f"rewards: {rewards}")
-#         def safe_mean(x, mask=None):
-#             if mask is not None:
-#                 return safe_mean(x[mask])
-#             if isinstance(x, torch.Tensor) and x.numel() > 0:
-#                 return x.float().mean().item()
-#             return x if isinstance(x, (int, float)) else 0.0
-# 
-#         self.extras["log"] = {
-#             "rewards": safe_mean(rewards),
-#             "rewards_wo_bonus": safe_mean(rewards_wo_bonus),
-#             "dist_reward": safe_mean(dist_reward),
-#             "grasp_reward": safe_mean(grasp_success_bonus),
-#             "vel_penalty": safe_mean(vel_penalty),
-#             "num_grasped": safe_mean(is_grasped, mask=self.reference_traj_info.pick_flg),
-#             "z_pos_reward": safe_mean(obj_z_pos_reward),
-#             "contacts_reward": safe_mean(contacts_reward),
-#         }
-#         return rewards
+
     def _get_rewards(self) -> torch.Tensor:
         # Refresh the intermediate values after the physics steps
         self._compute_intermediate_values()
@@ -263,13 +231,13 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
         rewards_wo_bonus = rewards.clone()
 
         # if self.champion_indices has an index of 1, give it a bonu
-        progress_coefficient = 100
+        progress_coefficient = 1.0
         # add progress_coefficient*gpt_progress if nonzero
         for env_id in range(self.num_envs):
             additional_bonus = progress_coefficient * self.gpt_progress[env_id]
             if additional_bonus > 0:
                 rewards[env_id] += additional_bonus
-                print(f"Bonus applied to env {env_id}: {additional_bonus:.2f}")
+                # print(f"Bonus applied to env {env_id}: {additional_bonus:.2f}")
         # flash the self.champion_indices
         def safe_mean(x, mask=None):
             if mask is not None:
@@ -299,7 +267,7 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
             rgb_gpu = self._camera.data.output["rgb"][..., :3]
             rgb_gpu = rgb_gpu.to(torch.uint8)
             for env_id in range(self.num_envs):
-                if env_id == 0:
-                    self.frames[env_id].append(rgb_gpu[env_id].clone())
+                #if env_id == 0:
+                self.frames[env_id].append(rgb_gpu[env_id].clone())
         # print(f"debug3: num of self.frames: {len(self.frames[0])}")
         return obs
