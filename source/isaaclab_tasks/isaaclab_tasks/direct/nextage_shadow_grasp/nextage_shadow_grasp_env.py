@@ -663,6 +663,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
         if not self.robot_cfg.off_camera_sensor:
             if self.robot_cfg.first_person_camera:
                 pass
+            if "wake" in self.robot_cfg.__class__.__name__.lower():
+                pass
             else:
                 eyes = env_origins + self.camera_pos[env_ids] + torch.randn_like(self.camera_pos[env_ids]) * 0.2
                 targets = self.obj_pos[env_ids] + torch.randn_like(self.obj_pos[env_ids]) * 0.05

@@ -141,6 +141,49 @@ class ShadowRobotCfg(RobotCfg):
         self.camera_pos = (-0.65, 0.3, 1.5)
         super().__init__(grasp_type=grasp_type, is_training=is_training)
 
+
+class ShadowRobotWakeCfg(RobotCfg):
+    def __init__(self, grasp_type: str = "active", is_training: bool = True):
+        self.usd_path = "scripts/my_models/shadow/floating_shadow.usd"
+        self.init_joint_pos = {
+            "rh_Tx": 0.0, "rh_Ty": 0.0, "rh_Tz": 2.0, "rh_roll": math.pi/2, "rh_pitch": 0.0, "rh_yaw": math.pi,
+            "rh_FFJ4": 0.0, "rh_FFJ3": 0.0, "rh_FFJ2": 0.0, "rh_FFJ1": 0.0, "rh_MFJ4": 0.0, "rh_MFJ3": 0.0, "rh_MFJ2": 0.0, "rh_MFJ1": 0.0, "rh_RFJ4": 0.0, "rh_RFJ3": 0.0, "rh_RFJ2": 0.0, "rh_RFJ1": 0.0, "rh_THJ5": 0.0, "rh_THJ4": 0.0, "rh_THJ2": 0.0, "rh_THJ1": 0.0,
+        }
+        self.init_pos, self.init_rot = (0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0)
+        self.actuators = {
+            "right_hand": ImplicitActuatorCfg(
+                joint_names_expr=["rh_.*"],
+                effort_limit=1e6,         # Allows very high effort
+                velocity_limit=1e6,       # Allows very high velocity
+                stiffness=1e6,            # Allows very high stiffness
+                damping=1e3,              # Enough damping to prevent oscillations
+            )
+        }
+        self.arm_names = ["rh_Tx", "rh_Ty", "rh_Tz", "rh_roll", "rh_pitch", "rh_yaw"]
+        self.n_finger_joint = 16
+        self.hand_util = ShadowHandUtils(grasp_type=grasp_type)
+        self.off_camera_sensor = False
+        self.off_contact_sensor = False
+        self.camera_data_types = ["rgb"] # , "normals"]
+        self.compute_pointcloud = False
+        if "depth" not in self.camera_data_types:
+            self.compute_pointcloud = False
+        self.camera = CameraCfg(
+            prim_path="/World/envs/env_.*/side_cam",
+            update_period=0.1,
+            height=480,
+            width=640,
+            data_types=["rgb"],
+            update_latest_camera_pose=True,
+            spawn=sim_utils.PinholeCameraCfg(
+                focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
+            ),
+            offset=CameraCfg.OffsetCfg(pos=(0.3,0.3,1.0), rot=(0.29,0.24,0.55,0.74), convention="opengl"),
+        )
+        self.first_person_camera = False
+        self.camera_pos = (-0.65, 0.3, 1.5)
+        super().__init__(grasp_type=grasp_type, is_training=is_training)
+
 class HondaRobotCfg(RobotCfg):
     def __init__(self, grasp_type: str = "active", is_training: bool = True):
         self.usd_path = "scripts/my_models/honda/ur10_honda_fix_physics.usd"
@@ -168,7 +211,7 @@ class HondaRobotCfg(RobotCfg):
         self.arm_names = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
         self.n_finger_joint = 18
         self.hand_util = HondaHandUtils(grasp_type=grasp_type)
-        self.off_camera_sensor = True
+        self.off_camera_sensor = False
         self.off_contact_sensor = True
         self.first_person_camera = False
         super().__init__(grasp_type=grasp_type, is_training=is_training)
@@ -180,6 +223,8 @@ def get_robot_cfg(robot_name: str, grasp_type: str = "active", is_training: bool
         return NextageShadowRobotCfg(grasp_type=grasp_type, is_training=is_training)
     elif robot_name == "shadow":
         return ShadowRobotCfg(grasp_type=grasp_type, is_training=is_training)
+    elif robot_name == "shadow-wake":
+        return ShadowRobotWakeCfg(grasp_type=grasp_type, is_training=is_training)
     elif robot_name == "ur10-honda":
         return HondaRobotCfg(grasp_type=grasp_type, is_training=is_training)
     else:
