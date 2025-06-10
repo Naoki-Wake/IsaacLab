@@ -79,7 +79,7 @@ class NextageShadowGraspVisionEnvCfg(NextageShadowGraspEnvCfg):
     grasp_type = "active"  # or "passive"
     hand_util = ShadowHandUtils(grasp_type=grasp_type) if "shadow" in robot_name else HondaHandUtils(grasp_type=grasp_type)
 
-    off_camera_sensor = False  # if True, no camera sensor will be used, only the robot state will be observed
+    off_camera_sensor = True  # if True, no camera sensor will be used, only the robot state will be observed
     camera = CameraCfg(
          prim_path="/World/envs/env_.*/side_cam",
          update_period=0.1,
@@ -102,6 +102,41 @@ class NextageShadowGraspVisionEnvCfg(NextageShadowGraspEnvCfg):
     #         width=320,
     #     )
 
+def load_credentials(env_file: str) -> dict:
+    """
+    Load credentials from a .env file or environment.
+    """
+    try:
+        from dotenv import dotenv_values
+    except ImportError:
+        dotenv_values = lambda f: os.environ
+
+    creds = dotenv_values(env_file)
+    required = [
+        "OPENAI_API_KEY",
+        "AZURE_OPENAI_API_KEY",
+        "AZURE_OPENAI_ENDPOINT",
+        "AZURE_OPENAI_DEPLOYMENT_NAME",
+    ]
+    for key in required:
+        creds.setdefault(key, os.getenv(key, ""))
+    return creds
+
+
+def init_vlm_client(creds: dict):
+    from openai import OpenAI, AzureOpenAI
+    """
+    Initialize the GPT-4 Vision client for Azure or OpenAI.
+    """
+    if creds.get("AZURE_OPENAI_API_KEY"):
+        client = AzureOpenAI(
+            api_key=creds["AZURE_OPENAI_API_KEY"],
+            azure_endpoint=creds["AZURE_OPENAI_ENDPOINT"],
+            api_version="2024-02-01"
+        )
+        return client, {"model": creds["AZURE_OPENAI_DEPLOYMENT_NAME"]}
+    client = OpenAI(api_key=creds["OPENAI_API_KEY"])
+    return client, {"model": "gpt-4o"}
 
 class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
     # pre-physics step calls
@@ -123,6 +158,8 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
         self.step_in_episode = 0
         self.camera_skip = 1
         self.experiment_date = datetime.now().strftime("%Y-%m-%d-%H-%M")
+        self.creds = load_credentials("source/isaaclab_tasks/isaaclab_tasks/utils/auth.env")
+        self.client, self.client_params = init_vlm_client(self.creds)
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         terminated, truncated = super()._get_dones()
@@ -154,13 +191,13 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
                 indices = np.linspace(0, total - 1, num_frames_to_sample, endpoint=True, dtype=int)
                 indices = np.unique(indices)  # avoid duplicates in short videos
             sampled_frames = [self.frames[env_id][i].cpu().numpy() for i in indices]
-            #progress = ask_gpt(
-            #    "source/isaaclab_tasks/isaaclab_tasks/utils/auth.env",
-            #    sampled_frames,
-            #)
-            progress = ask_phi4(
+            progress = ask_gpt(
+                self.client, self.client_params,
                 sampled_frames,
             )
+            #progress = ask_phi4(
+            #    sampled_frames,
+            #)
             self.gpt_ctr += 1
             # if progress is high, save the video
             if progress > 0.9:
