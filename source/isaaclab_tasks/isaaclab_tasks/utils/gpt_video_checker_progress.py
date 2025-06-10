@@ -157,17 +157,15 @@ def query_vlm(client, client_params: dict, prompt_content: list[dict]) -> dict:
 
 
 def ask_gpt(
-    creds_path: str,
+    client, client_params: dict,
     frames_candidate: list[np.ndarray],
 ) -> float:
     """
     Sample frames from both videos, query GPT, and return True if 'first' wins.
     """
-    creds = load_credentials(creds_path)
-    client, params = init_vlm_client(creds)
 
     prompt_content = build_prompt_content(frames_candidate)
-    result = query_vlm(client, params, prompt_content)
+    result = query_vlm(client, client_params, prompt_content)
     # print(result)
     answer = result.get("answer", "").lower()
     # check if the answer is a valid stage
