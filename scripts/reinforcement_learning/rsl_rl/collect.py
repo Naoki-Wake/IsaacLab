@@ -35,6 +35,8 @@ parser.add_argument(
     help="Use the pre-trained checkpoint from Nucleus.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument("--collect-data", action="store_true", default=False, help="Collect data for DP.")
+parser.add_argument("--store-frames", action="store_true", default=False, help="Store frames in the dataset.")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -83,7 +85,8 @@ def main():
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
     env_cfg.is_training = False
-    env_cfg.is_data_collection = True
+    if args_cli.collect_data:
+        env_cfg.is_data_collection = True
     # env_cfg.off_camera_sensor = False
     env_cfg.robot_name = "shadow"
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
@@ -187,8 +190,7 @@ def main():
         return dict(result)
 
     results: list = []
-    data_collect_for_dp = True
-    if data_collect_for_dp:
+    if args_cli.collect_data:
         action_space = base_env.cfg.action_space
         n_finger_joints = base_env.robot_cfg.n_finger_joint
         H, W = base_env.robot_cfg.camera.height, base_env.robot_cfg.camera.width
@@ -252,6 +254,7 @@ def main():
             pointcloud=[[] for _ in range(args_cli.num_envs)],
         )
 
+    cnt = 0
     while simulation_app.is_running():
         start_time = time.time()
         # run everything in inference mode
@@ -262,11 +265,10 @@ def main():
             # env stepping
             obs, rewards, dones, extras = env.step(actions)
             res.update(dict(rewards=rewards, dones=dones))
-            frames = extras.pop("frames", None)
             res.update(extras)
             res = tensor_to_numpy(res)
-            # results.append(res)
-            if data_collect_for_dp:
+
+            if args_cli.collect_data:
                 dp_ref = extras["dp_ref"]
                 delta_eef_pos, delta_eef_rot, finger_js = dp_ref["delta_eef_pos"], dp_ref["delta_eef_rot"], dp_ref["finger_js"]
                 _dp_actions = torch.cat(
@@ -287,38 +289,50 @@ def main():
                         dp_data_buf[key][env_id].append(_dp_data_buf_step[key][env_id])
 
                 finger_js_prev = finger_js
-                prev_frames = frames
+                prev_frames = extras["frames"]
+            else:
+                if not args_cli.store_frames:
+                    extras.pop("frames", None)
+                results.append(res)
 
-        done_envs = torch.nonzero(dones).squeeze(-1)
-        if done_envs.numel() > 0:
-            # for each fiished env, store dataset
-            for env_id in done_envs:
-                for step in range(len(dp_data_buf["actions"][env_id])):
-                    dp_data = dict(
-                        state=dp_data_buf["state"][env_id][step],
-                        actions=dp_data_buf["actions"][env_id][step],
-                        image=dp_data_buf["image"][env_id][step],
-                        pointcloud=dp_data_buf["pointcloud"][env_id][step],
-                        segmentation=dp_data_buf["segmentation"][env_id][step],
-                        depth=dp_data_buf["depth"][env_id][step],
-                        task=f"grasp {base_env.cfg.grasp_type}",
-                    )
-                    dataset.add_frame(dp_data)
-                print("[INFO] Added frame to dataset:", env_id, dataset.meta.total_frames, dataset.meta.total_episodes)
-                dataset.save_episode()
+        if args_cli.collect_data:
+            done_envs = torch.nonzero(dones).squeeze(-1)
+            if done_envs.numel() > 0:
+                # for each fiished env, store dataset
+                for env_id in done_envs:
+                    for step in range(len(dp_data_buf["actions"][env_id])):
+                        dp_data = dict(
+                            state=dp_data_buf["state"][env_id][step],
+                            actions=dp_data_buf["actions"][env_id][step],
+                            image=dp_data_buf["image"][env_id][step],
+                            pointcloud=dp_data_buf["pointcloud"][env_id][step],
+                            segmentation=dp_data_buf["segmentation"][env_id][step],
+                            depth=dp_data_buf["depth"][env_id][step],
+                            task=f"grasp {base_env.cfg.grasp_type}",
+                        )
+                        dataset.add_frame(dp_data)
+                    print("[INFO] Added frame to dataset:", env_id, dataset.meta.total_frames, dataset.meta.total_episodes)
+                    dataset.save_episode()
 
-            # reset the data buffer for the finished environments
-            for env_id in done_envs:
-                for key in dp_data_buf.keys():
-                    dp_data_buf[key][env_id] = []
+                # reset the data buffer for the finished environments
+                for env_id in done_envs:
+                    for key in dp_data_buf.keys():
+                        dp_data_buf[key][env_id] = []
 
-        if dataset.meta.total_episodes > 30:
-            break
+            if dataset.meta.total_episodes > 30:
+                break
+        else:
+            if args_cli.store_frames and cnt > 50:
+                # break early as storing frames is heavy
+                break
+            elif cnt > 300:
+                break
 
         # time delay for real-time evaluation
         sleep_time = dt - (time.time() - start_time)
         if args_cli.real_time and sleep_time > 0:
             time.sleep(sleep_time)
+        cnt += 1
 
     results_dict: dict = list_of_dict_to_dict_of_list(results)
     # close the simulator

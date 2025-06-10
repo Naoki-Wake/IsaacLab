@@ -29,7 +29,8 @@ from isaaclab.assets import RigidObject, RigidObjectCfg
 
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.controllers import DifferentialIKController, DifferentialIKControllerCfg
-from isaaclab.utils.math import subtract_frame_transforms, quat_error_magnitude, euler_xyz_from_quat, quat_mul, quat_conjugate
+from isaaclab.utils.math import subtract_frame_transforms, quat_error_magnitude, quat_mul, quat_conjugate, quat_from_euler_xyz
+from isaaclab_tasks.utils._math import euler_xyz_from_quat
 
 from isaaclab_tasks.utils.hand_utils import ShadowHandUtils, HondaHandUtils, ReferenceTrajInfo
 from isaaclab_tasks.utils.compute_relative_state import compute_object_state_in_hand_frame
@@ -195,8 +196,13 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     angvel_penalty_scale = 0.1      # Penalty for excessive angular velocity
     z_pos_reward_scale = 10.0       # Scale for z-position reward
     contact_reward_scale = 0.5      # Scale for contact reward
+    force_penalty_scale = 1.0      # Penalty for excessive force
     height_bonus_threshold = 0.05   # Height threshold for bonus
     obj_rot_penalty_scale = 1.0     # Penalty for object rotation deviation
+    obj_rot_threshold = math.radians(15)  # Threshold for object rotation deviation
+    obj_rot_threshold = math.radians(180)  # Threshold for object rotation deviation
+    rel_obj_vel_threshold = 0.1  # Threshold for relative object velocity
+
 
 class NextageShadowGraspEnv(DirectRLEnv):
     # pre-physics step calls
@@ -253,6 +259,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         self.ref_target_pos = torch.zeros((self.num_envs, 3), device=self.device)
         self.ref_finger_offset = torch.zeros((self.num_envs, len(self.hand_util.position_tip_links), 3), device=self.device)
+
+        self.gravity = torch.tensor(self.sim.cfg.gravity, device=self.device, dtype=torch.float32)
 
         if not self.robot_cfg.off_camera_sensor and not self.robot_cfg.first_person_camera:
             # Camera position
@@ -545,7 +553,11 @@ class NextageShadowGraspEnv(DirectRLEnv):
             current_handQ_world=cur_eef_rot[env_slice],
             current_hand_joint=self.robot_dof_targets[env_slice, self.hand_full_indices],
             action_handP=self.actions[env_slice, :3] * self.action_scale[None, :3],
-            action_handQ=None,
+            action_handQ=quat_from_euler_xyz(
+                roll=self.actions[env_slice, 3] * self.action_scale[None, 3],
+                pitch=self.actions[env_slice, 4] * self.action_scale[None, 4],
+                yaw=self.actions[env_slice, 5] * self.action_scale[None, 5]
+            ),
             action_hand_joint=self.actions[env_slice, len(self.arm_indices):-1] * self.action_scale[None, len(self.arm_indices):-1],
         )
         arm_targets, self.ik_fail = self._solve_ik(env_slice, self.ik_target_pos, self.ik_target_rot)
@@ -671,7 +683,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         obs = torch.cat(
             (
                 self.hand2obj["pos"],
-                torch.stack(euler_xyz_from_quat(self.hand2obj["quat"]), dim=-1),
+                self.hand2obj["quat"],
                 dof_pos_scaled,
                 *diff_finger,
                 finger_effort,
@@ -703,7 +715,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         if hasattr(self, "_prev_hand_pos") and hasattr(self, "_prev_hand_rot"):
             delta_hand_pos = hand_pos - self._prev_hand_pos
             delta_hand_rot = quat_mul(quat_conjugate(self._prev_hand_rot), hand_rot)
-            delta_hand_rot_rpy = torch.stack(euler_xyz_from_quat(delta_hand_rot), dim=-1)
+            delta_hand_rot_rpy = euler_xyz_from_quat(delta_hand_rot)
             dp_ref.update(
                 delta_eef_pos=delta_hand_pos, delta_eef_rot=delta_hand_rot_rpy,
             )
@@ -849,7 +861,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
         vel_penalty = - (vel * self.cfg.vel_penalty_scale + ang_vel * self.cfg.angvel_penalty_scale)
         vel_penalty = torch.where(~self.reference_traj_info.pick_flg, vel_penalty, torch.zeros_like(vel_penalty))
 
-        obj_rot_penalty = -self.cfg.obj_rot_penalty_scale * quat_error_magnitude(self.obj_initial_rot, self.obj_rot)
+        obj_rot = quat_error_magnitude(self.obj_initial_rot, self.obj_rot)
+        obj_rot_penalty = -self.cfg.obj_rot_penalty_scale * obj_rot
 
         obj_z_pos = torch.clamp(self.obj_pos[:, 2] - self.cfg.table_height - self._obj_scales[:, 2], min=0.0)
         obj_z_pos_reward = torch.where(
@@ -860,16 +873,28 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         # contact forces
         if self.net_contact_forces is not None:
-            is_contact = torch.max(torch.norm(self.net_contact_forces, dim=-1), dim=1)[0] > 1.0
+            is_contact = torch.max(torch.norm(self.net_contact_forces, dim=-1), dim=1)[0] > 0.1
+            obj_internal_force = torch.sum(-self.net_contact_forces[:, 0], dim=1)  # (N, 4, 3) -> (N, 3)
+            obj_internal_torque = torch.sum(
+                torch.cross(self.contact_position - self.obj_pos[:, None, :], -self.net_contact_forces[:, 0]), dim=1
+            )
+            force_penalty = -torch.norm(obj_internal_force, dim=-1) * self.cfg.force_penalty_scale - torch.norm(obj_internal_torque, dim=-1) * self.cfg.force_penalty_scale
+            # if self.reference_traj_info.pick_flg.any():
+            #     import pdb; pdb.set_trace()
         else:
             is_contact = torch.zeros((self.num_envs, 1), device=self.device, dtype=torch.bool)
+            force_penalty = torch.zeros((self.num_envs,), device=self.device)
+
         contacts_reward = torch.sum(is_contact, dim=1) * self.cfg.contact_reward_scale
 
         rel_vel = torch.norm(self.hand2obj["lin_vel"], dim=-1)
         # grasp is success if the object is not moving with respect to the hand in the process of picking
-        is_grasped = torch.logical_and(rel_vel < 0.1, self.reference_traj_info.pick_flg)
+        is_grasped = torch.logical_and(
+            obj_rot < self.cfg.obj_rot_threshold,
+            torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg)
+        )
         is_grasped_full = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold * 0.8)
-        is_grasped_half =  torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold / 2 * 0.8)
+        is_grasped_half = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold / 2 * 0.8)
 
         self.is_grasped_buf[:] = is_grasped_full
 
@@ -879,7 +904,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
             torch.zeros_like(is_grasped_full)
         )
 
-        rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward + obj_rot_penalty
+        rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward + obj_rot_penalty#  + force_penalty
 
         # print(f"rewards: {rewards}")
         def safe_mean(x, mask=None):
@@ -906,6 +931,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
             "num_grasped_half": safe_mean(is_grasped_half, mask=self.reference_traj_info.pick_flg),
             "z_pos_reward": safe_mean(obj_z_pos_reward, mask=self.reference_traj_info.pick_flg),
             "contacts_reward": safe_mean(contacts_reward),
+            "force_penalty": safe_mean(force_penalty),
         }
         return rewards
 

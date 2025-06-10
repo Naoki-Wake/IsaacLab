@@ -9,9 +9,9 @@ from isaaclab_tasks.utils._math import quat_slerp_batch
 from isaaclab_tasks.utils.third_party.tf import transformations
 from isaaclab_tasks.utils.third_party.urdf_parser_py.urdf import URDF
 import isaaclab_tasks.utils.fk_using_urdf as urdf_fk
+from source.isaaclab.isaaclab.utils.math import quat_mul
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-
 
 class ReferenceTrajInfo:
     def __init__(self, num_envs, device, finger_coupling_rule: callable, n_hand_joints: int, eval_mode: bool, pick_height:float=0.05):
@@ -62,7 +62,7 @@ class ReferenceTrajInfo:
             interp_pos = interp_pos + action_handP
 
         if action_handQ is not None:
-            interp_quat = transformations.quaternion_multiply(action_handQ, interp_quat)
+            interp_quat = quat_mul(action_handQ, interp_quat)
 
         return interp_pos.float(), interp_quat.float()
 
