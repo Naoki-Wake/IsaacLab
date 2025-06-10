@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn.functional
 from typing import Literal
+from isaaclab.utils.math import euler_xyz_from_quat as euler_xyz_from_quat_isaaclab
 
 # customized functions for batched quaternion operations
 def quat_slerp_batch(q1: torch.Tensor, q2: torch.Tensor, tau: float) -> torch.Tensor:
@@ -42,3 +43,8 @@ def quat_slerp_batch(q1: torch.Tensor, q2: torch.Tensor, tau: float) -> torch.Te
 
     result = factor1 * q1 + factor2 * q2
     return torch.nn.functional.normalize(result, dim=-1)
+
+def euler_xyz_from_quat(quat: torch.Tensor):
+    rot = torch.stack(euler_xyz_from_quat_isaaclab(quat), dim=-1)
+    raise
+    return euler_xyz_from_quat_isaaclab(quat)
