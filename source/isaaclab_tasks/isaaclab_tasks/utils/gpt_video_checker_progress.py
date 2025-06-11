@@ -108,6 +108,8 @@ def build_prompt_content(
     header = (
         "Determine the progress of a robot task involving grasping an object.\n"
         "Consider the sequence of images below."
+        "Note: These images may show multiple environments in the background. "
+        "Focus only on the robot and object that appear most prominently in the foreground."
     )
     content.append({"type": "text", "text": header})
 

@@ -5,7 +5,7 @@
 **/build*/
 **/*.so
 **/*.log*
-
+LLM_logs/
 # Omniverse
 **/*.dmp
 **/.thumbs

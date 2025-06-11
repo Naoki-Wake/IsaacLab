@@ -88,12 +88,13 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
         self.experiment_date = datetime.now().strftime("%Y-%m-%d-%H-%M")
         self.creds = load_credentials("source/isaaclab_tasks/isaaclab_tasks/utils/auth.env")
         self.client, self.client_params = init_vlm_client(self.creds)
+        self.envs_to_save = None
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         terminated, truncated = super()._get_dones()
         done_envs = torch.where(terminated | truncated)[0].tolist()
         done_envs_truncated = torch.where(truncated)[0].tolist() # only consider truncated cases because episodes fail if terminated
-
+        self.envs_to_save = done_envs_truncated
         if not self.robot_cfg.off_camera_sensor:
             for env_id in done_envs:
                 # if env_id == 0:  # only write video for the first environment
@@ -109,7 +110,7 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
         if not self.gpt_frames[env_id]:
             return
         if is_truncated:
-            num_frames_to_sample = 1
+            num_frames_to_sample = 3
             total = len(self.gpt_frames[env_id])
             if num_frames_to_sample == 1:
                     indices = [total - 1]
@@ -128,21 +129,21 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
             #)
             self.gpt_ctr += 1
             # if progress is high, save the video
-            if progress > 0.0:
-                fps  = int(1.0 / (self.dt * self.camera_skip))
-                if not os.path.exists(f"./videos/{self.experiment_date}"):
-                    os.makedirs(f"./videos/{self.experiment_date}")
-                path = f"./videos/{self.experiment_date}/env{env_id:04d}_counter_{self.gpt_ctr:04d}.mp4"
-
-                H, W, _ = self.gpt_frames[env_id][0].shape
-                vw = cv2.VideoWriter(path, fourcc, fps, (W, H))   # open writer
-                print(f"writing {len(self.gpt_frames[env_id])} frames to {path}")
-                for f in self.gpt_frames[env_id]:
-                    f_cpu = f.cpu().numpy()  # move to CPU and convert to numpy
-                    f_cpu = cv2.cvtColor(f_cpu, cv2.COLOR_BGR2RGB)  # convert from RGBA to RGB
-                    vw.write(f_cpu)  # write frame
-                vw.release()
-                # import pdb; pdb.set_trace()
+            # if progress > 0.0:
+            #     fps  = int(1.0 / (self.dt * self.camera_skip))
+            #     if not os.path.exists(f"./videos/{self.experiment_date}"):
+            #         os.makedirs(f"./videos/{self.experiment_date}")
+            #     path = f"./videos/{self.experiment_date}/env{env_id:04d}_counter_{self.gpt_ctr:04d}.mp4"
+# 
+            #     H, W, _ = self.gpt_frames[env_id][0].shape
+            #     vw = cv2.VideoWriter(path, fourcc, fps, (W, H))   # open writer
+            #     print(f"writing {len(self.gpt_frames[env_id])} frames to {path}")
+            #     for f in self.gpt_frames[env_id]:
+            #         f_cpu = f.cpu().numpy()  # move to CPU and convert to numpy
+            #         f_cpu = cv2.cvtColor(f_cpu, cv2.COLOR_BGR2RGB)  # convert from RGBA to RGB
+            #         vw.write(f_cpu)  # write frame
+            #     vw.release()
+            #     # import pdb; pdb.set_trace()
             self.gpt_progress[env_id] = progress
         else:
             self.gpt_progress[env_id] = 0.0
@@ -176,7 +177,7 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
 
         # contact forces
         if self.net_contact_forces is not None:
-            is_contact = torch.max(torch.norm(self.net_contact_forces, dim=-1), dim=1)[0] > 0.1
+            is_contact = torch.max(torch.norm(self.net_contact_forces, dim=-1), dim=1)[0] > 1.0
             obj_internal_force = torch.sum(-self.net_contact_forces[:, 0], dim=1)  # (N, 4, 3) -> (N, 3)
             obj_internal_torque = torch.sum(
                 torch.cross(self.contact_position - self.obj_pos[:, None, :], -self.net_contact_forces[:, 0]), dim=1
@@ -192,10 +193,11 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
 
         rel_vel = torch.norm(self.hand2obj["lin_vel"], dim=-1)
         # grasp is success if the object is not moving with respect to the hand in the process of picking
-        is_grasped = torch.logical_and(
-            obj_rot < self.cfg.obj_rot_threshold,
-            torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg)
-        )
+        # is_grasped = torch.logical_and(
+        #     obj_rot < self.cfg.obj_rot_threshold,
+        #     torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg)
+        # )
+        is_grasped = torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg)
         is_grasped_full = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold * 0.8)
         is_grasped_half = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold / 2 * 0.8)
 
@@ -246,6 +248,31 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
             "contacts_reward": safe_mean(contacts_reward),
             "force_penalty": safe_mean(force_penalty),
         }
+        for i in self.envs_to_save:
+            save_log = {
+                "rewards": rewards[i].item(),
+                "rewards_wo_bonus": rewards_wo_bonus[i].item(),
+                "GPT_reward": progress_coefficient * self.gpt_progress[i].item(),
+                "dist_reward": dist_reward[i].item(),
+                "grasp_reward": grasp_success_bonus[i].item(),
+                "vel_penalty": vel_penalty[i].item(),
+                "obj_rot_penalty": obj_rot_penalty[i].item(),
+                "num_grasped": is_grasped_full[i].item(),
+                "num_grasped_half": is_grasped_half[i].item(),
+                "z_pos_reward": obj_z_pos_reward[i].item(),
+                "contacts_reward": contacts_reward[i].item(),
+                "force_penalty": force_penalty[i].item(),
+                "gpt_progress": self.gpt_progress[i].item(),
+            }
+            if not os.path.exists(f"./LLM_logs/{self.experiment_date}"):
+                os.makedirs(f"./LLM_logs/{self.experiment_date}")
+            path = f"./LLM_logs/{self.experiment_date}/env{i:04d}_counter_{self.gpt_ctr:04d}.json"
+            with open(path, "w") as f:
+                import json
+                json.dump(save_log, f, indent=4)
+            #import pdb; pdb.set_trace()
+        # clear self.gpt_progress[env_id]
+        self.gpt_progress[:] = 0.0
         return rewards
 
 
