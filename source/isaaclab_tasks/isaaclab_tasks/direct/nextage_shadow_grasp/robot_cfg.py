@@ -162,6 +162,7 @@ class ShadowRobotWakeCfg(RobotCfg):
         self.arm_names = ["rh_Tx", "rh_Ty", "rh_Tz", "rh_roll", "rh_pitch", "rh_yaw"]
         self.n_finger_joint = 16
         self.hand_util = ShadowHandUtils(grasp_type=grasp_type)
+        # self.off_camera_sensor = True
         self.off_camera_sensor = False
         self.off_contact_sensor = False
         self.camera_data_types = ["rgb"] # , "normals"]
