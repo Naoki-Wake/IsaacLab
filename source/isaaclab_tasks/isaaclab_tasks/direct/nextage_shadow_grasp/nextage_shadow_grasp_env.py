@@ -876,7 +876,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         # contact forces
         if self.net_contact_forces is not None:
-            is_contact = torch.max(torch.norm(self.net_contact_forces, dim=-1), dim=1)[0] > 0.1
+            is_contact = torch.max(torch.norm(self.net_contact_forces, dim=-1), dim=1)[0] > 1.0
             obj_internal_force = torch.sum(-self.net_contact_forces[:, 0], dim=1)  # (N, 4, 3) -> (N, 3)
             obj_internal_torque = torch.sum(
                 torch.cross(self.contact_position - self.obj_pos[:, None, :], -self.net_contact_forces[:, 0]), dim=1
@@ -892,10 +892,11 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         rel_vel = torch.norm(self.hand2obj["lin_vel"], dim=-1)
         # grasp is success if the object is not moving with respect to the hand in the process of picking
-        is_grasped = torch.logical_and(
-            obj_rot < self.cfg.obj_rot_threshold,
-            torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg)
-        )
+        # is_grasped = torch.logical_and(
+        #     obj_rot < self.cfg.obj_rot_threshold,
+        #     torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg)
+        # )
+        is_grasped = torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg)
         is_grasped_full = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold * 0.8)
         is_grasped_half = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold / 2 * 0.8)
 
