@@ -12,7 +12,7 @@ DEG_TO_RAD = math.pi / 180
 class RobotCfg():
     def __init__(self, grasp_type: str = "active", is_training: bool = True):
         self.action_space = 6 + self.n_finger_joint + 1 # [x, y, z, roll, pitch, yaw] + [n_finger_joint joints] + [terminate]
-        self.action_scale = [0.01, 0.01, 0.01] + [0.0, 10.0 * DEG_TO_RAD, 0.0] + [15.0 * DEG_TO_RAD] * self.n_finger_joint + [1.0]
+        self.action_scale = [0.01, 0.01, 0.01] + [0.0, 10.0 * DEG_TO_RAD, 0.0] + [20.0 * DEG_TO_RAD] * self.n_finger_joint + [1.0]
         self.contact_sensor: ContactSensorCfg = ContactSensorCfg(
             prim_path="/World/envs/env_.*/Robot/.*",
             history_length=1,
