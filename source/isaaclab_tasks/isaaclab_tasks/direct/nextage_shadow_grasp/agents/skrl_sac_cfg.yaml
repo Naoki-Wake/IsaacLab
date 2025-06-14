@@ -1,0 +1,83 @@
+seed: 42
+
+algothm: SAC
+# Models are instantiated using skrl's model instantiator utility
+# https://skrl.readthedocs.io/en/latest/api/utils/model_instantiators.html
+models:
+  separate: True
+  policy:  # see gaussian_model parameters
+    class: GaussianMixin
+    clip_actions: False
+    clip_log_std: True
+    min_log_std: -20.0
+    max_log_std: 2.0
+    initial_log_std: 0.0
+    network:
+      - name: net
+        input: OBSERVATIONS
+        layers: [1024, 512, 256, 128] # 256, 128, 64
+        activations: elu
+    output: ACTIONS
+  # critic を 2 系統用意（q1 / q2）
+  q1:
+    class: DeterministicMixin
+    network:
+      - name: net
+        input: OBSERVATIONS_ACTIONS   # SAC は (s,a) 入力
+        layers: [256, 128, 64]
+        activations: elu
+    output: ONE
+
+  q2:                            # パラメータは q1 と共有しても良い
+    class: DeterministicMixin
+    network:
+      - name: net
+        input: OBSERVATIONS_ACTIONS
+        layers: [256, 128, 64]
+        activations: elu
+    output: ONE
+
+
+# Rollout memory
+# https://skrl.readthedocs.io/en/latest/api/memories/random.html
+memory:
+  class: RandomMemory           # skrl 標準の経験再生メモリ
+  memory_size: 1000       # 1M transition
+  replacement: False            # FIFO で上書き
+
+# PPO agent configuration (field names are from PPO_DEFAULT_CONFIG)
+# https://skrl.readthedocs.io/en/latest/api/agents/ppo.html
+agent:
+  class: SAC
+  # 収集と更新
+  timesteps_per_learning: 1     # 1 ステップ収集ごとに学習
+  gradient_steps: 4
+  batch_size: 128
+  # 目標エントロピー (action_dim = A とすると -A くらいが典型)
+  target_entropy: -6
+  learn_entropy: True           # α を自動調整
+  tau: 0.005                    # ターゲット更新率
+  discount_factor: 0.99
+  learning_rate: 3.0e-4
+  learning_rate_scheduler: null
+  # warm-up
+  random_timesteps: 100       # ε-greedy 的な純探索
+  learning_starts: 100  # 学習開始までのステップ数
+  # クリッピング
+  grad_norm_clip: 1.0
+  # ログ出力
+  experiment:
+    directory: "nextage_shadow_grasp_direct"
+    experiment_name: ""
+    write_interval: 1000
+    checkpoint_interval: 1000
+    wandb: true                      # ← 追加 (1 でも可)
+    wandb_kwargs:                    # ← 任意でダッシュボード設定
+      project: isaaclab_wake
+
+# Sequential trainer
+# https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
+trainer:
+  class: SequentialTrainer
+  timesteps: 25000            # 総ステップ数
+  environment_info: log

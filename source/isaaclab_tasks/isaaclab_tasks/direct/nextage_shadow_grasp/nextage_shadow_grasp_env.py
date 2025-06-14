@@ -56,7 +56,7 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
 
     episode_length_s = 3
     decimation = 8
-    observation_space = 58
+    observation_space = 74
     state_space = 0
     action_space = 0
 
@@ -462,7 +462,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
     def _pre_physics_step(self, actions: torch.Tensor):
         # Clone and store the original actions
         self.actions = actions.clone()
-
         # Add noise to actions for exploration (only during training)
         if hasattr(self, 'is_training') and self.is_training:
             # Generate random noise

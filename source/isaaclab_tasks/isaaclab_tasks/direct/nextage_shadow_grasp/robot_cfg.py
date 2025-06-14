@@ -163,7 +163,7 @@ class ShadowRobotWakeCfg(RobotCfg):
         self.n_finger_joint = 16
         self.hand_util = ShadowHandUtils(grasp_type=grasp_type)
         # self.off_camera_sensor = True
-        self.off_camera_sensor = False
+        self.off_camera_sensor = True
         self.off_contact_sensor = False
         self.camera_data_types = ["rgb"] # , "normals"]
         self.compute_pointcloud = False

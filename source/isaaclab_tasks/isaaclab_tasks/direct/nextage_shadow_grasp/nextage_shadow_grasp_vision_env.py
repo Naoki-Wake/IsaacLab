@@ -248,29 +248,30 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
             "contacts_reward": safe_mean(contacts_reward),
             "force_penalty": safe_mean(force_penalty),
         }
-        for i in self.envs_to_save:
-            save_log = {
-                "rewards": rewards[i].item(),
-                "rewards_wo_bonus": rewards_wo_bonus[i].item(),
-                "GPT_reward": progress_coefficient * self.gpt_progress[i].item(),
-                "dist_reward": dist_reward[i].item(),
-                "grasp_reward": grasp_success_bonus[i].item(),
-                "vel_penalty": vel_penalty[i].item(),
-                "obj_rot_penalty": obj_rot_penalty[i].item(),
-                "num_grasped": is_grasped_full[i].item(),
-                "num_grasped_half": is_grasped_half[i].item(),
-                "z_pos_reward": obj_z_pos_reward[i].item(),
-                "contacts_reward": contacts_reward[i].item(),
-                "force_penalty": force_penalty[i].item(),
-                "gpt_progress": self.gpt_progress[i].item(),
-            }
-            if not os.path.exists(f"./LLM_logs/{self.experiment_date}"):
-                os.makedirs(f"./LLM_logs/{self.experiment_date}")
-            path = f"./LLM_logs/{self.experiment_date}/env{i:04d}_counter_{self.gpt_ctr:04d}.json"
-            with open(path, "w") as f:
-                import json
-                json.dump(save_log, f, indent=4)
-            #import pdb; pdb.set_trace()
+        if not self.robot_cfg.off_camera_sensor:
+            for i in self.envs_to_save:
+                save_log = {
+                    "rewards": rewards[i].item(),
+                    "rewards_wo_bonus": rewards_wo_bonus[i].item(),
+                    "GPT_reward": progress_coefficient * self.gpt_progress[i].item(),
+                    "dist_reward": dist_reward[i].item(),
+                    "grasp_reward": grasp_success_bonus[i].item(),
+                    "vel_penalty": vel_penalty[i].item(),
+                    "obj_rot_penalty": obj_rot_penalty[i].item(),
+                    "num_grasped": is_grasped_full[i].item(),
+                    "num_grasped_half": is_grasped_half[i].item(),
+                    "z_pos_reward": obj_z_pos_reward[i].item(),
+                    "contacts_reward": contacts_reward[i].item(),
+                    "force_penalty": force_penalty[i].item(),
+                    "gpt_progress": self.gpt_progress[i].item(),
+                }
+                if not os.path.exists(f"./LLM_logs/{self.experiment_date}"):
+                    os.makedirs(f"./LLM_logs/{self.experiment_date}")
+                path = f"./LLM_logs/{self.experiment_date}/env{i:04d}_counter_{self.gpt_ctr:04d}.json"
+                with open(path, "w") as f:
+                    import json
+                    json.dump(save_log, f, indent=4)
+                #import pdb; pdb.set_trace()
         # clear self.gpt_progress[env_id]
         self.gpt_progress[:] = 0.0
         return rewards
