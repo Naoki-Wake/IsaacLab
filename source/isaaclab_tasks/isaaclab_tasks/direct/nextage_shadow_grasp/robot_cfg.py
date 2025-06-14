@@ -3,6 +3,7 @@ from isaaclab.assets import Articulation, ArticulationCfg
 from isaaclab.actuators.actuator_cfg import ImplicitActuatorCfg
 from isaaclab.sensors import ContactSensor, ContactSensorCfg
 from isaaclab.sensors import CameraCfg, Camera
+from isaaclab.sensors import TiledCamera, TiledCameraCfg
 import isaaclab.sim as sim_utils
 
 from isaaclab_tasks.utils.hand_utils import ShadowHandUtils, HondaHandUtils
@@ -169,7 +170,19 @@ class ShadowRobotWakeCfg(RobotCfg):
         self.compute_pointcloud = False
         if "depth" not in self.camera_data_types:
             self.compute_pointcloud = False
-        self.camera = CameraCfg(
+        # self.camera = CameraCfg(
+        #     prim_path="/World/envs/env_.*/side_cam",
+        #     update_period=0.1,
+        #     height=480,
+        #     width=640,
+        #     data_types=["rgb"],
+        #     update_latest_camera_pose=True,
+        #     spawn=sim_utils.PinholeCameraCfg(
+        #         focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
+        #     ),
+        #     offset=CameraCfg.OffsetCfg(pos=(0.3,0.3,1.0), rot=(0.29,0.24,0.55,0.74), convention="opengl"),
+        # )
+        self.camera = TiledCameraCfg(
             prim_path="/World/envs/env_.*/side_cam",
             update_period=0.1,
             height=480,
@@ -179,7 +192,7 @@ class ShadowRobotWakeCfg(RobotCfg):
             spawn=sim_utils.PinholeCameraCfg(
                 focal_length=24.0, focus_distance=400.0, horizontal_aperture=40, clipping_range=(0.1, 1.0e5)
             ),
-            offset=CameraCfg.OffsetCfg(pos=(0.3,0.3,1.0), rot=(0.29,0.24,0.55,0.74), convention="opengl"),
+            offset=TiledCameraCfg.OffsetCfg(pos=(0.3,0.3,1.0), rot=(0.29,0.24,0.55,0.74), convention="opengl"),
         )
         self.first_person_camera = False
         self.camera_pos = (-0.65, 0.3, 1.5)
