@@ -436,7 +436,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
             self.scene.sensors["contact_sensor"] = self._contact_sensor
 
         if not self.robot_cfg.off_camera_sensor:
-            self._camera = Camera(self.robot_cfg.camera)
+            #self._camera = Camera(self.robot_cfg.camera)
+            self._camera = TiledCamera(self.robot_cfg.camera)
             self.scene.sensors["camera"] = self._camera
 
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs

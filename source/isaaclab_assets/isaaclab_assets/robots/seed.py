@@ -16,15 +16,16 @@ import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
 from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
+import os
 
 ##
 # Configuration
 ##
-
+DOCKER_ISAACLAB_PATH = os.environ.get("DOCKER_ISAACLAB_PATH", "/home/arr/IsaacLab")
 
 SEED_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"/home/nawake/IsaacLab/scripts/my_models/seed_r7_description/noid_mercury/noid_mercury.usd",
+        usd_path=f"{DOCKER_ISAACLAB_PATH}/scripts/my_models/seed_r7_description/noid_mercury/noid_mercury.usd",
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=True,
             max_depenetration_velocity=5.0,
