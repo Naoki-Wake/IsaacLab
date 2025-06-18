@@ -211,8 +211,9 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
 
         rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward + obj_rot_penalty#  + force_penalty
         rewards_wo_bonus = rewards.clone()
+        # rewards = rewards * 0
         
-        progress_coefficient = 1.0
+        progress_coefficient = 2.0
         # add progress_coefficient*gpt_progress if nonzero
         for env_id in range(self.num_envs):
             additional_bonus = progress_coefficient * self.gpt_progress[env_id]

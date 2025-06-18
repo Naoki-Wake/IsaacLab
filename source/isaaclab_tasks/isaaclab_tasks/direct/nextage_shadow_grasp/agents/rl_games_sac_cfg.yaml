@@ -37,9 +37,9 @@ params:
       scale_value: 1.0
 
     max_epochs: 10000
-    num_steps_per_episode: 8
+    num_steps_per_episode: 23
     save_best_after: 500
-    save_frequency: 1000
+    save_frequency: 500
     gamma: 0.99
     init_alpha: 1
     alpha_lr: 5e-3
@@ -51,6 +51,3 @@ params:
     num_warmup_steps: 10 # total number of warmup steps: num_actors * num_steps_per_episode * num_warmup_steps
     replay_buffer_size: 5000
     num_actors: 64
-
-    use_wandb: True
-    wandb_project: isaaclab_wake
