@@ -88,25 +88,19 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
         self.experiment_date = datetime.now().strftime("%Y-%m-%d-%H-%M")
         self.creds = load_credentials("source/isaaclab_tasks/isaaclab_tasks/utils/auth.env")
         self.client, self.client_params = init_vlm_client(self.creds)
-        self.envs_to_save = []
-
+        self.envs_done = []
+        self.envs_truncated = []
+        
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         terminated, truncated = super()._get_dones()
-        done_envs = torch.where(terminated | truncated)[0].tolist()
-        done_envs_truncated = torch.where(truncated)[0].tolist() # only consider truncated cases because episodes fail if terminated
-        self.envs_to_save = done_envs_truncated
-        if not self.robot_cfg.off_camera_sensor:
-            for env_id in done_envs:
-                # if env_id == 0:  # only write video for the first environment
-                is_truncated = env_id in done_envs_truncated
-                # print(f"debug: num of frames for env {env_id} is {len(self.gpt_frames[env_id])}, is_truncated: {is_truncated}")
-                self._write_video(env_id, is_truncated)
-                #print(f"debug: done writing video. num of frames for env {env_id} is {len(self.gpt_frames[env_id])}")
+        self.envs_done = torch.where(terminated | truncated)[0].tolist()
+        self.envs_truncated = torch.where(truncated)[0].tolist() # only consider truncated cases because episodes fail if terminated
+
         return terminated, truncated
 
 
 
-    def _write_video(self, env_id, is_truncated: bool = False):
+    def _write_video(self, env_id, is_truncated: bool = False, additional_string: str = ""):
         if not self.gpt_frames[env_id]:
             return
         if is_truncated:
@@ -123,6 +117,7 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
             progress = ask_gpt(
                 self.client, self.client_params,
                 sampled_frames,
+                additional_string=additional_string,
             )
             #progress = ask_phi4(
             #    sampled_frames,
@@ -211,15 +206,31 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
 
         rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward + obj_rot_penalty#  + force_penalty
         rewards_wo_bonus = rewards.clone()
-        # rewards = rewards * 0
-        
-        progress_coefficient = 2.0
+        if self.robot_cfg.disable_analytic_reward:
+            rewards = rewards * 0
+
+        # compute GPT rewards
+        if not self.robot_cfg.off_camera_sensor:
+            for env_id in self.envs_done:
+                # if env_id == 0:  # only write video for the first environment
+                is_truncated = env_id in self.envs_truncated
+                print(f"Computing GPT reward for env {env_id}")
+                if self.robot_cfg.signal_sensorinfo_to_gpt:
+                    sensor_data = {"is_contact": {
+                                    "description": "Whether the object is in contact with each finger tip.",
+                                    "data": is_contact[env_id].cpu().numpy().tolist()}}
+                    self._write_video(env_id, is_truncated, additional_string=str(sensor_data))
+                else:
+                    self._write_video(env_id, is_truncated)
+                #print(f"debug: done writing video. num of frames for env {env_id} is {len(self.gpt_frames[env_id])}")
+
+        progress_coefficient = 1.0
         # add progress_coefficient*gpt_progress if nonzero
         for env_id in range(self.num_envs):
             additional_bonus = progress_coefficient * self.gpt_progress[env_id]
             if additional_bonus > 0:
                 rewards[env_id] += additional_bonus
-                # print(f"Bonus applied to env {env_id}: {additional_bonus:.2f}")
+                print(f"Bonus applied to env {env_id}: {additional_bonus:.2f}")
 
         # print(f"rewards: {rewards}")
         def safe_mean(x, mask=None):

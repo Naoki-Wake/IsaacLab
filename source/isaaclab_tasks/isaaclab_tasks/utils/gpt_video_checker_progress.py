@@ -100,6 +100,7 @@ def resize_and_encode(frame: np.ndarray, max_short: int = 768, max_long: int = 2
 
 def build_prompt_content(
     frames_candidate: list[np.ndarray],
+    additional_string: str = "",
 ) -> list[dict]:
     """
     Build the chat content: instruction text and image_url objects.
@@ -116,7 +117,8 @@ def build_prompt_content(
     for frame in frames_candidate:
         uri = resize_and_encode(frame)
         content.append({"type": "image_url", "image_url": {"url": uri, "detail": "low"}})
-
+    if len(additional_string) > 0:
+        content.append({"type": "text", "text": additional_string})
     footer = (
         "Evaluate the progress in four stages: "
         "(0) the hand is not near the object; "
@@ -161,12 +163,13 @@ def query_vlm(client, client_params: dict, prompt_content: list[dict]) -> dict:
 def ask_gpt(
     client, client_params: dict,
     frames_candidate: list[np.ndarray],
+    additional_string: str = "",
 ) -> float:
     """
     Sample frames from both videos, query GPT, and return True if 'first' wins.
     """
 
-    prompt_content = build_prompt_content(frames_candidate)
+    prompt_content = build_prompt_content(frames_candidate, additional_string=additional_string)
     result = query_vlm(client, client_params, prompt_content)
     # print(result)
     answer = result.get("answer", "").lower()
