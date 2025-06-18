@@ -76,7 +76,10 @@ def main():
     env_cfg = parse_env_cfg(
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
-    env_cfg.is_training = False
+    env_cfg.mode = "eval"
+    # env_cfg.off_camera_sensor = False
+    env_cfg.robot_name = "shadow-multi"
+    env_cfg.episode_length_s *= 2
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # specify directory for logging experiments

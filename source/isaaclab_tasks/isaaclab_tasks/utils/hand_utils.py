@@ -13,50 +13,67 @@ from source.isaaclab.isaaclab.utils.math import quat_mul
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
+def computer_center(contact_web_position):
+    # N x 3 array
+    min_pos = contact_web_position.min(axis=0)
+    max_pos = contact_web_position.max(axis=0)
+    center = (min_pos + max_pos) / 2.0
+    return center
+
 class ReferenceTrajInfo:
-    def __init__(self, num_envs, device, finger_coupling_rule: callable, n_hand_joints: int, eval_mode: bool, pick_height:float=0.05):
+    def __init__(self, num_envs, device, finger_coupling_rule: callable, n_hand_joints: int, mode: str, pick_height:float=0.05):
         # placeholder for the reference trajectory
         self.num_envs = num_envs
         self.device = device
-        self.handP_pybworld = torch.zeros((num_envs, 3), device=device)
-        self.handQ_pybworld = torch.zeros((num_envs, 4), device=device)
-        self.handP_pybworld_pre = torch.zeros((num_envs, 3), device=device)
-        self.handQ_pybworld_pre = torch.zeros((num_envs, 4), device=device)
+
+        self.handP_world = torch.zeros((num_envs, 3), device=device)
+        self.handQ_world = torch.zeros((num_envs, 4), device=device)
+        self.handP_world_pre = torch.zeros((num_envs, 3), device=device)
+        self.handQ_world_pre = torch.zeros((num_envs, 4), device=device)
         self.hand_preshape_joint = torch.zeros((num_envs, n_hand_joints), device=device)
         self.hand_shape_joint = torch.zeros((num_envs, n_hand_joints), device=device)
 
         self.pick_flg = torch.zeros((num_envs,), device=device).bool()
+        self.all_done = torch.zeros((num_envs,), device=device).bool()  # Flag to indicate if all tasks are done
 
         # The ratio of the total timestep used for end-effector and finger motion.
-
-        if eval_mode:
+        self.pick_to = [0., 0., pick_height]
+        if mode == "train":
             self.subtasks_span = {
-                "approach": [0.0, 0.3], "grasp": [0.3, 0.45], "pick": [0.45, 1.0],
+                "approach": [0.0, 0.5], "grasp": [0.5, 0.8], "pick": [0.8, 1.0],
             }
+        elif mode == "demo":
+            self.subtasks_span = {
+                "approach": [0.0, 0.25], "grasp": [0.25, 0.5], "pick": [0.5, 1.0],
+            }
+            self.pick_to = [0., -0.1, 0.1]  # pick height is halved for demo mode
         else:
             self.subtasks_span = {
-                "approach": [0.0, 0.6], "grasp": [0.6, 0.9], "pick": [0.9, 1.0],
+                "approach": [0.0, 0.25], "grasp": [0.25, 0.4], "pick": [0.4, 1.0],
             }
-        self._pick_diff = torch.tensor([0., 0., pick_height], device=self.device).unsqueeze(0)
+
+        self._pick_diff = torch.tensor(self.pick_to, device=self.device).unsqueeze(0)
         self.finger_couping_rule = finger_coupling_rule
 
-    def update(self, env_slice, handP_pybworld, handQ_pybworld, handP_pybworld_pre, handQ_pybworld_pre, hand_preshape_joint, hand_shape_joint, reset=False):
+    def update(self, env_slice, handP_world, handQ_world, handP_world_pre, handQ_world_pre, hand_preshape_joint, hand_shape_joint, reset=False):
         """Update the reference trajectory for the given environment slice"""
-        self.handP_pybworld[env_slice] = handP_pybworld.float()
-        self.handQ_pybworld[env_slice] = handQ_pybworld.float()
-        self.handP_pybworld_pre[env_slice] = handP_pybworld_pre.float()
-        self.handQ_pybworld_pre[env_slice] = handQ_pybworld_pre.float()
+        self.handP_world[env_slice] = handP_world.float()
+        self.handQ_world[env_slice] = handQ_world.float()
+        self.handP_world_pre[env_slice] = handP_world_pre.float()
+        self.handQ_world_pre[env_slice] = handQ_world_pre.float()
         self.hand_preshape_joint[env_slice] = hand_preshape_joint.float()
         self.hand_shape_joint[env_slice] = hand_shape_joint.float()
-        if reset: self.pick_flg[env_slice] = False
+        if reset:
+            self.pick_flg[env_slice] = False
+            self.all_done[env_slice] = False  # Reset the done flag for the environment slice
 
     def _get_eef_reftraj(self, env_slice, interp_ratio, action_handP=None, action_handQ=None):
         """Get the reference trajectory for the given environment slice"""
         # Interpolate the reference trajectory
         if interp_ratio.ndim == 1:
             interp_ratio = interp_ratio[:, None]
-        interp_pos = (1 - interp_ratio) * self.handP_pybworld_pre[env_slice] + interp_ratio * self.handP_pybworld[env_slice]
-        interp_quat = quat_slerp_batch(self.handQ_pybworld_pre[env_slice], self.handQ_pybworld[env_slice], interp_ratio)
+        interp_pos = (1 - interp_ratio) * self.handP_world_pre[env_slice] + interp_ratio * self.handP_world[env_slice]
+        interp_quat = quat_slerp_batch(self.handQ_world_pre[env_slice], self.handQ_world[env_slice], interp_ratio)
 
         if action_handP is not None:
             interp_pos = interp_pos + action_handP
@@ -119,12 +136,37 @@ class ReferenceTrajInfo:
             eef_pos[env_indices_pick], eef_quat[env_indices_pick] = self._get_eef_reftraj(env_indices_pick, timestep_subtasks["pick"][_pick_mask])
             finger_pos[env_indices_pick] = self._get_finger_reftraj(env_indices_pick, timestep_subtasks["pick"][_pick_mask])
 
+        # check all task is completed using timestep_subtasks
+        self.all_done[env_slice] = timestep >= 1.0
         return eef_pos, eef_quat, finger_pos
+
+class ReferenceTrajInfoMulti():
+    def __init__(self, keys, num_envs, device, hand_module, mode: str, pick_height:float=0.05):
+        self._keys = keys
+        self.device = device
+        self.ref_traj_info = {
+            key: ReferenceTrajInfo(
+                num_envs, device,
+                hand_module[key].couplingRuleTensor, len(hand_module[key].hand_full_joint_names),
+                mode, pick_height
+            ) for key in keys
+        }
+
+    def get(self, key, *args, **kwargs):
+        return self.ref_traj_info[key].get(*args, **kwargs)
+
+    def update(self, key, *args, **kwargs):
+        self.ref_traj_info[key].update(*args, **kwargs)
+
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            raise AttributeError(f"{name} is private.")
+        return {key: getattr(self.ref_traj_info[key], name) for key in self._keys}
 
 
 class HandUtils:
     def __init__(self, grasp_type):
-        raise NotImplementedError("HandUtils is not implemented yet")
+        self.grasp_type = grasp_type
 
     def couplingRule(self, jv):
         return jv
@@ -138,12 +180,12 @@ class HandUtils:
                 np.sin(np.deg2rad(theta))]
 
     def calcHandQuaternionXfrontZupPassive(self, theta, phi):
-        raise NotImplementedError("Passive grasp not implemented yet")
-
-    # def calcHandQuaternionXfrontZupActive(self, theta, phi):
-    #     qy = transformations.quaternion_about_axis(np.deg2rad(-(90-theta)), [0, 1, 0])
-    #     return transformations.quaternion_multiply(qy, [])
-    #     # return qy
+        q_z_base = transformations.quaternion_about_axis(np.deg2rad(180), [0, 0, 1])
+        q_y_base = transformations.quaternion_about_axis(np.deg2rad(90), [0, 1, 0])
+        # q_z_theta = transformations.quaternion_about_axis(0, [0, 0, 1]) # no rotation around Z-axis
+        q_z_theta = transformations.quaternion_about_axis(np.deg2rad(180 + phi - self._hand_angle_offset), [0, 0, 1]) #  - self._hand_angle_offset
+        return transformations.quaternion_multiply(q_z_theta,
+                                                   transformations.quaternion_multiply(q_y_base, q_z_base))
 
     def calcHandQuaternionXfrontZupActive(self, theta, phi):
         # Step 1: base rotation (X: 180, Y: 0, Z: -90)
@@ -151,27 +193,27 @@ class HandUtils:
         # import pdb; pdb.set_trace()
         # Step 2: rotation around world Y-axis: -(90 - theta)
         q_y_theta = transformations.quaternion_about_axis(
-            np.deg2rad(-(90 - theta)), [0, 1, 0]
+            np.deg2rad(-(90 - theta) - self._hand_angle_offset), [0, 1, 0]
         )
         # Step 3: apply q_y_theta * q_base (left rotation applied in world frame)
         q = transformations.quaternion_multiply(q_y_theta, q_base)
-
-        return q  # (w, x, y, z)
+        return q
 
 
     def calculateXfrontZup(self, theta, phi):
         # calculate the hand orientation
         # below handQ calculates when contact-web orientation = identity matrix
         if self.grasp_type == "active":
-            handQ_pybworld0 = self.calcHandQuaternionXfrontZupActive(theta, phi)
+            handQ_world0 = self.calcHandQuaternionXfrontZupActive(theta, phi)
         elif self.grasp_type == "passive":
-            handQ_pybworld0 = self.calcHandQuaternionXfrontZupPassive(theta, phi)
+            handQ_world0 = self.calcHandQuaternionXfrontZupPassive(theta, phi)
         elif self.grasp_type == "lazy":
-            handQ_pybworld0 = self.calcHandQuaternionXfrontZupPassive(theta, phi)
+            handQ_world0 = self.calcHandQuaternionXfrontZupPassive(theta, phi)
 
-        return handQ_pybworld0
+        return handQ_world0
 
     def getReferenceTrajInfo(self, config, device):
+        config.update(self.getReferenceTrajParams(self.grasp_type, config["num_envs"]))
         _n_envs = config["num_envs"]
         ref_traj_config = []
 
@@ -185,6 +227,10 @@ class HandUtils:
                     _config_res[key] = np.array(_config[key][idx])
                 else:
                     _config_res[key] = _config[key]
+            _config_res["contact_web_position"] = self.computeCWP(_config_res["obj_position"], _config_res["obj_orientation"], _config_res["obj_scale"])
+            # _config_res["contact_center"] = _config_res["obj_position"]
+            #_config_res["contact_center"][2] += (_config_res["obj_scale"][2] - 0.03) #TODO:3 # center at the top of the object
+            _config_res["contact_center"] = computer_center(_config_res["contact_web_position"])
             return _config_res
 
         for i in range(_n_envs):
@@ -211,9 +257,19 @@ class HandUtils:
             return result
 
         ref_traj_config = _list_dict2dict_tensor(ref_traj_config, dtype=torch.float32, device=device)
-        # ref_traj_config["hand_preshape_joint"] = self.couplingRuleTensor(ref_traj_config["hand_preshape_joint"])
-        # ref_traj_config["hand_shape_joint"] = self.couplingRuleTensor(ref_traj_config["hand_shape_joint"])
         return ref_traj_config
+
+    def getReferenceTrajParams(self, grasp_type, num_envs) -> dict:
+        """Get the parameters for the reference trajectory based on the grasp type."""
+        param = {}
+        if grasp_type == "active":
+            param["grasp_approach_vertical"] = np.random.uniform(90, 120, size=num_envs).tolist()
+            param["grasp_approach_horizontal"] = np.zeros(num_envs).tolist()
+        elif grasp_type == "passive":
+            param["grasp_approach_vertical"] = np.zeros(num_envs).tolist()
+            param["grasp_approach_horizontal"] = np.random.uniform(-90, -90, size=num_envs).tolist()
+        param["back"] = (0.15 * np.ones(num_envs)).tolist()  # back off distance
+        return param
 
     def _handConfigurationFromContactWeb(self, config):
         # Estimate hand configuration from contact web
@@ -240,8 +296,8 @@ class HandUtils:
         def _xyzw2wxyz(q): return [q[3], q[0], q[1], q[2]]
         def _wxyz2xyzw(q): return [q[1], q[2], q[3], q[0]]
 
-        p_pyb2cwebt0 = config["grasp_cweb0_position"]
-        q_pyb2cwebt0 = _wxyz2xyzw(config["grasp_cweb0_orientation"])
+        p_pyb2cwebt0 = config["contact_center"]
+        q_pyb2cwebt0 = _wxyz2xyzw(config["obj_orientation"])
 
         vd_theta = config["grasp_approach_vertical"]
         vd_phi = config["grasp_approach_horizontal"]
@@ -250,31 +306,31 @@ class HandUtils:
 
         # calculate the hand orientation
         # below handQ calculates when contact-web orientation = identity matrix
-        handQ_pybworld0 = self.calculateXfrontZup(vd_theta, vd_phi)
-        handQ_pybworld0_pre = self.calculateXfrontZup(vd_theta_pre, vd_phi_pre)
+        handQ_world0 = self.calculateXfrontZup(vd_theta, vd_phi)
+        handQ_world0_pre = self.calculateXfrontZup(vd_theta_pre, vd_phi_pre)
 
         # rotate handQ depending on the contact-web orientation
-        handQ_pybworld = transformations.quaternion_multiply(q_pyb2cwebt0, handQ_pybworld0)
-        handQ_pybworld_pre = transformations.quaternion_multiply(q_pyb2cwebt0, handQ_pybworld0_pre)
+        handQ_world = transformations.quaternion_multiply(q_pyb2cwebt0, handQ_world0)
+        handQ_world_pre = transformations.quaternion_multiply(q_pyb2cwebt0, handQ_world0_pre)
 
         # calculate how much to translate from diff atload and goal toplace
-        contactP_atload = self._compute_contactP_atload(handQ_pybworld, skip=False)
-        handP_pybworld = p_pyb2cwebt0 - contactP_atload
+        contactP_atload = self._compute_contactP_atload(handQ_world, skip=False)
+        handP_world = p_pyb2cwebt0 - contactP_atload
         vd = np.array(self.calcApproachDirectionXfrontZup(vd_theta, vd_phi))
         vd = rotateUnitVector(q_pyb2cwebt0, vd)
 
-        handP_pybworld_pre = np.array(uround(handP_pybworld)) + config["back"] / np.linalg.norm(vd) * vd
-
+        handP_world_pre = np.array(uround(handP_world)) + config["back"] / np.linalg.norm(vd) * vd
         return {
-            "handP_pybworld": handP_pybworld,
-            "handQ_pybworld": _xyzw2wxyz(handQ_pybworld),
-            "handP_pybworld_pre": handP_pybworld_pre,
-            "handQ_pybworld_pre": _xyzw2wxyz(handQ_pybworld_pre),
+            "handP_world": handP_world,
+            "handQ_world": _xyzw2wxyz(handQ_world),
+            "handP_world_pre": handP_world_pre,
+            "handQ_world_pre": _xyzw2wxyz(handQ_world_pre),
             "hand_preshape_joint": self.preshape_joint,
             "hand_shape_joint": self.shape_joint,
+            "contact_web_position": config["contact_web_position"],
         }
 
-    def _compute_contactP_atload(self, handQ_pybworld, skip=False):
+    def _compute_contactP_atload(self, handQ_world, skip=False):
         # transformation from finger tip to hand root
 
         contactP_atload = np.array([0.0, 0.0, 0.0])
@@ -286,25 +342,35 @@ class HandUtils:
         jvtmp = self.couplingRule(copy.deepcopy(self.shape_joint))
 
         for localization_num in self.virtual_finger:
-            chain_name = tmp.get_chain(tmp.get_root(), self.position_tip_links[localization_num], links=False)
+            chain_name = tmp.get_chain(self.urdf_root, self.position_tip_links[localization_num], links=False)
             jointstmp = []
             for c in chain_name:
                 j = 0.0
                 for jidx, jname in enumerate(self.hand_full_joint_names):
                     if jname == c: j = jvtmp[jidx]
                 jointstmp += [j]
-            root2tip = urdf_fk.chainname2trans(tmp, chain_name, jointstmp, fixed_excluded=False, get_com=True)
+            root2tip = urdf_fk.chainname2trans(tmp, chain_name, jointstmp, fixed_excluded=False, get_com=False)
             pyb2root = urdf_fk.Transform()
-            pyb2root.R = np.array(transformations.quaternion_matrix(handQ_pybworld))[0:3, 0:3]
+            pyb2root.R = np.array(transformations.quaternion_matrix(handQ_world))[0:3, 0:3]
             pyb2root.T = np.array([0, 0, 0])
             pyb2tip = pyb2root.dot(root2tip)
             contactP_atload += pyb2tip.T
         contactP_atload /= len(self.virtual_finger)
         return contactP_atload
+
+    def computeCWP(self):
+        raise NotImplementedError("computeCWP method must be implemented in the subclass")
+
 class ShadowHandUtils(HandUtils):
-    def __init__(self, grasp_type):
-        self.grasp_type = grasp_type
-        self.ik_target_link = "rh_forearm"
+    def __init__(self, grasp_type, hand_laterality="right", urdf_path=None):
+        super().__init__(grasp_type)
+        if self.grasp_type == "active":
+            self._hand_angle_offset = 30  # offset for the hand angle, can be set to a different value if needed
+        else:
+            self._hand_angle_offset = 0
+
+        hand_prefix = "rh" if hand_laterality == "right" else "lh"
+        self.ik_target_link = f"{hand_prefix}_forearm"
         # self.shape_joint = [-0.020622028419300796, 0.791124618965486, 0.7165877145100853, 0.0, 0.9159989384779349, 1.2087578520408695, -0.6628910395680104, 0.15071510414034017]
         # self.preshape_joint = [-0.020622028419300796, 0, 0, 0, 0, 1.2087578520408695, 0, 0]
 
@@ -321,38 +387,85 @@ class ShadowHandUtils(HandUtils):
             -0.020622028419300796, 0, 0, 0,
             0, 1.2087578520408695, 0, 0
         ]
-        self.hand_full_joint_names = [
-            "rh_FFJ4", "rh_FFJ3", "rh_FFJ2", "rh_FFJ1",
-            "rh_MFJ4", "rh_MFJ3", "rh_MFJ2", "rh_MFJ1",
-            "rh_RFJ4", "rh_RFJ3", "rh_RFJ2", "rh_RFJ1",
-            "rh_THJ5", "rh_THJ4", "rh_THJ2", "rh_THJ1",
+        # self.hand_full_joint_names = [
+        #     "rh_FFJ4", "rh_FFJ3", "rh_FFJ2", "rh_FFJ1",
+        #     "rh_MFJ4", "rh_MFJ3", "rh_MFJ2", "rh_MFJ1",
+        #     "rh_RFJ4", "rh_RFJ3", "rh_RFJ2", "rh_RFJ1",
+        #     "rh_THJ5", "rh_THJ4", "rh_THJ2", "rh_THJ1",
+        # ]
+        hand_full_joint_names = [
+            "FFJ4", "FFJ3", "FFJ2", "FFJ1",
+            "MFJ4", "MFJ3", "MFJ2", "MFJ1",
+            "RFJ4", "RFJ3", "RFJ2", "RFJ1",
+            "THJ5", "THJ4", "THJ2", "THJ1",
         ]
-        self.urdf_path = os.path.join(THIS_DIR, "urdf", "shadowhand_lite.urdf")
+        self.hand_full_joint_names = [
+            f"{hand_prefix}_{joint_name}" for joint_name in hand_full_joint_names
+        ]
+        if urdf_path is None:
+            urdf_path = os.path.join(THIS_DIR, "urdf", "shadowhand_lite.urdf")
+        self.urdf_path = urdf_path
+        self.urdf_root = f"{hand_prefix}_arm_base"
 
         if self.grasp_type == "active":
-            self.position_tip_links = ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal"]
-            self.force_tip_links = ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal"]
+            # self.position_tip_links = ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal"]
+            # self.force_tip_links = ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal"]
+            self.position_tip_links = [f"{hand_prefix}_ffdistal", f"{hand_prefix}_mfdistal", f"{hand_prefix}_rfdistal", f"{hand_prefix}_thdistal"]
+            self.force_tip_links = [f"{hand_prefix}_ffdistal", f"{hand_prefix}_mfdistal", f"{hand_prefix}_rfdistal", f"{hand_prefix}_thdistal"]
             self.virtual_finger = [1, 3]
         elif self.grasp_type == "passive":
-            self.position_tip_links = ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal", "rh_palm"]
-            self.force_tip_links = ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal", "rh_ffproximal", "rh_mfproximal", "rh_rfproximal", "rh_palm"]
+            # self.position_tip_links = ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal", "rh_palm"]
+            self.position_tip_links = [f"{hand_prefix}_ffdistal", f"{hand_prefix}_mfdistal", f"{hand_prefix}_rfdistal", f"{hand_prefix}_thdistal", f"{hand_prefix}_palm"]
+            self.force_tip_links = self.position_tip_links # temporal
+            # self.force_tip_links = ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal", "rh_ffproximal", "rh_mfproximal", "rh_rfproximal", "rh_palm"]
             self.virtual_finger = [1, 3, 4]
 
             # passive-force only parameters
             self.force_root_links = ["rh_thproximal", "rh_ffproximal", "rh_mfproximal", "rh_rfproximal"]
-            self.hand_point_pairs = [("rh_mfdistal", "rh_thdistal"), ("rh_thdistal", "rh_palm"), ("rh_palm", "rh_mfdistal")]
+            # ["rh_thproximal", "rh_ffproximal", "rh_mfproximal", "rh_rfproximal"]
+            self.hand_point_pairs = [
+                (f"{hand_prefix}_mfdistal", f"{hand_prefix}_thdistal"),
+                (f"{hand_prefix}_thdistal", f"{hand_prefix}_palm"),
+                (f"{hand_prefix}_palm", f"{hand_prefix}_mfdistal"),
+            ]
             # fingertip direction of pair.first for each pair in hand_point_pairs, direction in fingertip coords
             self.tip_point_direction = [[0, -1, 0], [0, -1, 0], [0, -1/np.sqrt(2), 1/np.sqrt(2)]]
         elif self.grasp_type == "lazy":
-            self.load_joint = "rh_FFJ3"
+            self.load_joint = f"{hand_prefix}_FFJ3"
 
             # other settings for loading robot, calculating rewards, etc.
-            self.robot_urdf = 'components/robots/shadow/urdf/shadowhand_lite.urdf'
-            self.position_tip_links = ["rh_ffmiddle", "rh_mfmiddle", "rh_rfmiddle"]
-            self.force_tip_links = ["rh_ffmiddle", "rh_mfmiddle", "rh_rfmiddle", "rh_thmiddle"]
-            self.reward_tip_links = {"rh_ffmiddle": "rh_ffmiddle", "rh_mfmiddle": "rh_mfmiddle", "rh_rfmiddle": "rh_rfmiddle"}
+            self.robot_urdf = os.path.join(THIS_DIR, "urdf", "shadowhand_lite.urdf")
+            self.position_tip_links = [f"{hand_prefix}_ffmiddle", f"{hand_prefix}_mfmiddle", f"{hand_prefix}_rfmiddle"]
+            self.force_tip_links = [f"{hand_prefix}_ffmiddle", f"{hand_prefix}_mfmiddle", f"{hand_prefix}_rfmiddle", f"{hand_prefix}_thmiddle"]
+            self.reward_tip_links = {
+                f"{hand_prefix}_ffmiddle": f"{hand_prefix}_ffmiddle",
+                f"{hand_prefix}_mfmiddle": f"{hand_prefix}_mfmiddle",
+                f"{hand_prefix}_rfmiddle": f"{hand_prefix}_rfmiddle"
+            }
             self.virtual_finger = [0]
 
+    def computeCWP(self, obj_loc, obj_rot, obj_scale):
+        if self.grasp_type == "active":
+            # ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal"]
+            # obj_center [x, y, z]
+            height = obj_scale[2] - 0.03 # 3 cm down from the top of the object
+            finger_offset = np.array([
+                [obj_scale[0], 0.5 * obj_scale[1], height],  # rh_ffdistal
+                [obj_scale[0], 0.0, height],  # rh_mfdistal
+                [obj_scale[0], -0.5 * obj_scale[1], height],  # rh_rfdistal
+                [-obj_scale[0], 0.0, height]   # rh_thdistal
+            ])
+        elif self.grasp_type == "passive":
+            # ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal", "rh_palm"]
+            # obj_center [x, y, z]
+            finger_offset = np.array([
+                [obj_scale[0], 0, obj_scale[2] / 2],
+                [obj_scale[0], 0., 0.0],  # rh_mfdistal
+                [obj_scale[0], 0, -obj_scale[2] / 2],  # rh_rfdistal
+                [-obj_scale[0], 0.0,  0.0],  # rh_thdistal
+                [0.0, -obj_scale[1], 0.0]  # rh_palm
+            ])
+        return obj_loc + finger_offset
 
     def couplingRule(self, jv):
         if len(jv) == 8:
@@ -420,7 +533,8 @@ class ShadowHandUtils(HandUtils):
 
 class HondaHandUtils(HandUtils):
     def __init__(self, grasp_type):
-        self.grasp_type = grasp_type
+        super().__init__(grasp_type)
+        self._hand_angle_offset = 0.0  # offset for the hand angle, can be set to a different value if needed
         self.ik_target_link = "RHand_FOREARM_ROOT_LINK"
 
         # 16 dim input
@@ -443,6 +557,6 @@ class HondaHandUtils(HandUtils):
         else:
             raise NotImplementedError("Honda hand only supports active grasp type")
 
-    def _compute_contactP_atload(self, handQ_pybworld, skip=False):
+    def _compute_contactP_atload(self, handQ_world, skip=False):
         #TODO should be overridden later!
         return np.array([0.0, 0.0, 0.0])

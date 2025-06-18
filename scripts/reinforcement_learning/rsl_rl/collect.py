@@ -77,7 +77,6 @@ from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 
 # PLACEHOLDER: Extension template (do not remove this comment)
 
-
 def main():
     """Play with RSL-RL agent."""
     # parse configuration
@@ -87,8 +86,9 @@ def main():
     env_cfg.is_training = False
     if args_cli.collect_data:
         env_cfg.is_data_collection = True
-    # env_cfg.off_camera_sensor = False
-    env_cfg.robot_name = "shadow"
+        env_cfg.off_camera_sensor = False
+    env_cfg.robot_name = "shadow-multi"
+    env_cfg.object_type = "superquadric"  # or "superquadric"
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # specify directory for logging experiments

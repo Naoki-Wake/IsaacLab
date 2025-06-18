@@ -11,11 +11,17 @@ class EventCfg:
     randomize_scale: EventTerm = None
 
 
-def create_grasp_event_cfg(base_obj_size) -> EventCfg:
+def create_grasp_event_cfg(base_obj_size, object_type, grasp_type, mode):
     # This event term randomizes the scale of the cube.
     # The mode is set to 'prestartup', which means that the scale is randomize on the USD stage before the
     # simulation starts.
     # Note: USD-level randomizations require the flag 'replicate_physics' to be set to False.
+    if object_type != "superquadric":
+        return None
+
+    if grasp_type == "passive":
+        return None
+
     randomize_scale = EventTerm(
         func=mdp.randomize_rigid_body_scale,
         mode="prestartup",

@@ -46,5 +46,19 @@ def quat_slerp_batch(q1: torch.Tensor, q2: torch.Tensor, tau: float) -> torch.Te
 
 def euler_xyz_from_quat(quat: torch.Tensor):
     rot = torch.stack(euler_xyz_from_quat_isaaclab(quat), dim=-1)
-    raise
     return euler_xyz_from_quat_isaaclab(quat)
+
+if __name__ == "__main__":
+    a = torch.Tensor(
+        [
+        [ 0.0017,  0.7071, -0.0017,  0.7071],
+        [ 0.0017,  0.7071, -0.0017,  0.7071],
+        ]
+    )
+    b = a.clone()
+
+    # to check if the output is the same as a and b
+    for f in torch.linspace(0, 1, 10):
+        out = quat_slerp_batch(a, b, f.item())
+        assert torch.allclose(out, a, atol=1e-6), f"Output mismatch at f={f.item()}"
+        print(f"Output matches for f={f.item()}")

@@ -7,9 +7,8 @@
 
 The following configuration parameters are available:
 
-* :obj:`UR10_CFG`: The UR10 arm without a gripper.
+* :obj:`NEXTAGE_CFG`: The Nextage + Shadow.
 
-Reference: https://github.com/ros-industrial/universal_robot
 """
 
 import isaaclab.sim as sim_utils
