@@ -15,8 +15,8 @@ THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def computer_center(contact_web_position):
     # N x 3 array
-    min_pos = contact_web_position.min(axis=0)
-    max_pos = contact_web_position.max(axis=0)
+    min_pos = contact_web_position.min(axis=0)[0]
+    max_pos = contact_web_position.max(axis=0)[0]
     center = (min_pos + max_pos) / 2.0
     return center
 
@@ -37,7 +37,7 @@ class ReferenceTrajInfo:
         self.all_done = torch.zeros((num_envs,), device=device).bool()  # Flag to indicate if all tasks are done
 
         # The ratio of the total timestep used for end-effector and finger motion.
-        self.pick_to = [0., 0., pick_height]
+        self.move_to = [0., 0., pick_height]
         if mode == "train":
             self.subtasks_span = {
                 "approach": [0.0, 0.5], "grasp": [0.5, 0.8], "pick": [0.8, 1.0],
@@ -46,13 +46,13 @@ class ReferenceTrajInfo:
             self.subtasks_span = {
                 "approach": [0.0, 0.25], "grasp": [0.25, 0.5], "pick": [0.5, 1.0],
             }
-            self.pick_to = [0., -0.1, 0.1]  # pick height is halved for demo mode
+            self.move_to = [0., 0.1, 0.1]  # pick height is halved for demo mode
         else:
             self.subtasks_span = {
                 "approach": [0.0, 0.25], "grasp": [0.25, 0.4], "pick": [0.4, 1.0],
             }
 
-        self._pick_diff = torch.tensor(self.pick_to, device=self.device).unsqueeze(0)
+        self._pick_diff = torch.tensor(self.move_to, device=self.device).unsqueeze(0)
         self.finger_couping_rule = finger_coupling_rule
 
     def update(self, env_slice, handP_world, handQ_world, handP_world_pre, handQ_world_pre, hand_preshape_joint, hand_shape_joint, reset=False):
@@ -212,9 +212,8 @@ class HandUtils:
 
         return handQ_world0
 
-    def getReferenceTrajInfo(self, config, device):
-        config.update(self.getReferenceTrajParams(self.grasp_type, config["num_envs"]))
-        _n_envs = config["num_envs"]
+    def getReferenceTrajInfo(self, num_envs, cwp, device):
+        config = self.getReferenceTrajParams(self.grasp_type, num_envs)
         ref_traj_config = []
 
         def _get_single_config(_config, idx):
@@ -227,13 +226,13 @@ class HandUtils:
                     _config_res[key] = np.array(_config[key][idx])
                 else:
                     _config_res[key] = _config[key]
-            _config_res["contact_web_position"] = self.computeCWP(_config_res["obj_position"], _config_res["obj_orientation"], _config_res["obj_scale"])
             # _config_res["contact_center"] = _config_res["obj_position"]
             #_config_res["contact_center"][2] += (_config_res["obj_scale"][2] - 0.03) #TODO:3 # center at the top of the object
-            _config_res["contact_center"] = computer_center(_config_res["contact_web_position"])
+            _config_res["contact_center"] = computer_center(cwp["position"][idx]).cpu().numpy()
+            _config_res["contact_orientation"] = cwp["orientation"][idx].cpu().numpy()
             return _config_res
 
-        for i in range(_n_envs):
+        for i in range(num_envs):
             # get the contact web position and orientation
             _config = _get_single_config(config, i)
             _ref_traj_config = self._handConfigurationFromContactWeb(_config)
@@ -263,7 +262,7 @@ class HandUtils:
         """Get the parameters for the reference trajectory based on the grasp type."""
         param = {}
         if grasp_type == "active":
-            param["grasp_approach_vertical"] = np.random.uniform(90, 120, size=num_envs).tolist()
+            param["grasp_approach_vertical"] = np.random.uniform(90, 95, size=num_envs).tolist()
             param["grasp_approach_horizontal"] = np.zeros(num_envs).tolist()
         elif grasp_type == "passive":
             param["grasp_approach_vertical"] = np.zeros(num_envs).tolist()
@@ -297,7 +296,7 @@ class HandUtils:
         def _wxyz2xyzw(q): return [q[1], q[2], q[3], q[0]]
 
         p_pyb2cwebt0 = config["contact_center"]
-        q_pyb2cwebt0 = _wxyz2xyzw(config["obj_orientation"])
+        q_pyb2cwebt0 = _wxyz2xyzw(config["contact_orientation"])
 
         vd_theta = config["grasp_approach_vertical"]
         vd_phi = config["grasp_approach_horizontal"]
@@ -327,7 +326,6 @@ class HandUtils:
             "handQ_world_pre": _xyzw2wxyz(handQ_world_pre),
             "hand_preshape_joint": self.preshape_joint,
             "hand_shape_joint": self.shape_joint,
-            "contact_web_position": config["contact_web_position"],
         }
 
     def _compute_contactP_atload(self, handQ_world, skip=False):
@@ -365,9 +363,9 @@ class ShadowHandUtils(HandUtils):
     def __init__(self, grasp_type, hand_laterality="right", urdf_path=None):
         super().__init__(grasp_type)
         if self.grasp_type == "active":
-            self._hand_angle_offset = 30  # offset for the hand angle, can be set to a different value if needed
+            self._hand_angle_offset = 20  # offset for the hand angle, can be set to a different value if needed
         else:
-            self._hand_angle_offset = 0
+            self._hand_angle_offset = 20
 
         hand_prefix = "rh" if hand_laterality == "right" else "lh"
         self.ik_target_link = f"{hand_prefix}_forearm"
@@ -443,29 +441,6 @@ class ShadowHandUtils(HandUtils):
                 f"{hand_prefix}_rfmiddle": f"{hand_prefix}_rfmiddle"
             }
             self.virtual_finger = [0]
-
-    def computeCWP(self, obj_loc, obj_rot, obj_scale):
-        if self.grasp_type == "active":
-            # ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal"]
-            # obj_center [x, y, z]
-            height = obj_scale[2] - 0.03 # 3 cm down from the top of the object
-            finger_offset = np.array([
-                [obj_scale[0], 0.5 * obj_scale[1], height],  # rh_ffdistal
-                [obj_scale[0], 0.0, height],  # rh_mfdistal
-                [obj_scale[0], -0.5 * obj_scale[1], height],  # rh_rfdistal
-                [-obj_scale[0], 0.0, height]   # rh_thdistal
-            ])
-        elif self.grasp_type == "passive":
-            # ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal", "rh_palm"]
-            # obj_center [x, y, z]
-            finger_offset = np.array([
-                [obj_scale[0], 0, obj_scale[2] / 2],
-                [obj_scale[0], 0., 0.0],  # rh_mfdistal
-                [obj_scale[0], 0, -obj_scale[2] / 2],  # rh_rfdistal
-                [-obj_scale[0], 0.0,  0.0],  # rh_thdistal
-                [0.0, -obj_scale[1], 0.0]  # rh_palm
-            ])
-        return obj_loc + finger_offset
 
     def couplingRule(self, jv):
         if len(jv) == 8:
@@ -560,3 +535,63 @@ class HondaHandUtils(HandUtils):
     def _compute_contactP_atload(self, handQ_world, skip=False):
         #TODO should be overridden later!
         return np.array([0.0, 0.0, 0.0])
+
+class CWPPredictor(object):
+    def __init__(self, grasp_type, robot_name, hand_laterality="right", obj_type="superquadric", device="cpu"):
+        self.device = device
+        self.grasp_type = grasp_type
+        self.robot_name = robot_name
+        self.obj_type = obj_type
+        self.hand_laterality = hand_laterality
+
+    def predict(self, hand_laterality, obj_position, obj_orientation, obj_scale):
+        self.hand_laterality = hand_laterality
+        if self.obj_type == "superquadric":
+            return self.predict_sq(obj_position, obj_orientation, obj_scale)
+        elif self.obj_type == "ycb":
+            return self.predict_ycb(obj_position, obj_orientation, obj_scale)
+        else:
+            raise ValueError(f"Unsupported object type: {self.obj_type}")
+
+    def predict_sq(self, obj_position, obj_orientation, obj_scale):
+        # obj_scale: shape [N, 3] = [N, x, y, z]
+        # device: self.device
+        height = torch.clamp(obj_scale[:, 2] - 0.03, min=0.0)  # [N]
+        if self.grasp_type == "active":
+            finger_offset = torch.stack([
+                torch.stack([obj_scale[:, 0], 0.5 * obj_scale[:, 1], height], dim=1),               # rh_ffdistal
+                torch.stack([obj_scale[:, 0], torch.zeros_like(height), height], dim=1),           # rh_mfdistal
+                torch.stack([obj_scale[:, 0], -0.5 * obj_scale[:, 1], height], dim=1),              # rh_rfdistal
+                torch.stack([-obj_scale[:, 0], torch.zeros_like(height), height], dim=1)           # rh_thdistal
+            ], dim=1)  # shape: [N, 4, 3]
+
+        elif self.grasp_type == "passive":
+            half_z = 0.5 * obj_scale[:, 2]
+            finger_offset = torch.stack([
+                torch.stack([obj_scale[:, 0], torch.zeros_like(half_z), half_z], dim=1),                    # rh_ffdistal
+                torch.stack([obj_scale[:, 0], torch.zeros_like(half_z), torch.zeros_like(half_z)], dim=1),  # rh_mfdistal
+                torch.stack([obj_scale[:, 0], torch.zeros_like(half_z), -half_z], dim=1),                   # rh_rfdistal
+                torch.stack([-obj_scale[:, 0], torch.zeros_like(half_z), torch.zeros_like(half_z)], dim=1), # rh_thdistal
+                torch.stack([torch.zeros_like(half_z), -obj_scale[:, 1], torch.zeros_like(half_z)], dim=1)  # rh_palm
+            ], dim=1)  # shape: [N, 5, 3]
+        return {"position": obj_position[:, None] + finger_offset, "orientation": obj_orientation}
+
+    def predict_ycb(self, obj_position, obj_orientation, obj_scale):
+        if self.grasp_type == "active":
+            # ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal"]
+            # obj_center [x, y, z]
+            height = obj_scale[:, 2] - 0.05 # torch.clamp(obj_scale[:, 2] - 0.03, min=0.0)  # [N]# 3 cm down from the top of the object
+            finger_offset = torch.stack([
+                torch.stack([obj_scale[:, 0], 0.5 * obj_scale[:, 1], height], dim=1),               # rh_ffdistal
+                torch.stack([obj_scale[:, 0], torch.zeros_like(height), height], dim=1),           # rh_mfdistal
+                torch.stack([obj_scale[:, 0], -0.5 * obj_scale[:, 1], height], dim=1),              # rh_rfdistal
+                torch.stack([-obj_scale[:, 0], torch.zeros_like(height), height], dim=1)           # rh_thdistal
+            ], dim=1)  # shape: [N, 4, 3]
+            if self.hand_laterality == "right":
+                offset = torch.Tensor([0.0, 0.01, 0.0]).to(self.device)
+            else:
+                offset = torch.Tensor([0.0, 0.06, 0.0]).to(self.device)
+        elif self.grasp_type == "passive":
+            raise NotImplementedError("Passive grasp type is not supported for YCB objects")
+        obj_position = obj_position[:, None] + finger_offset + offset[None, None]
+        return {"position": obj_position, "orientation": obj_orientation}

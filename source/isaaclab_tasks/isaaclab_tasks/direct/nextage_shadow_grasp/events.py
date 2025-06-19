@@ -20,16 +20,24 @@ def create_grasp_event_cfg(base_obj_size, object_type, grasp_type, mode):
         return None
 
     if grasp_type == "passive":
-        return None
+        scale_range = {
+            "x": (1.0 * base_obj_size[0], 1.0 * base_obj_size[0]),
+            "y": (1.0 * base_obj_size[1], 1.0 * base_obj_size[1]),
+            "z": (0.5 * base_obj_size[2], 1.25 * base_obj_size[2])
+        }
+    else:
+        scale_range = {
+            "x": (0.5 * base_obj_size[0], 1.25 * base_obj_size[0]),
+            "y": (0.5 * base_obj_size[1], 1.25 * base_obj_size[1]),
+            "z": (0.5 * base_obj_size[2], 1.25 * base_obj_size[2])
+        }
 
     randomize_scale = EventTerm(
         func=mdp.randomize_rigid_body_scale,
         mode="prestartup",
         params={
+            "scale_range": scale_range,
             # scale relative to the base size x(0.5, 1.25)
-            "scale_range": {"x": (0.5 * base_obj_size[0], 1.25 * base_obj_size[0]),
-                           "y": (0.5 * base_obj_size[1], 1.25 * base_obj_size[1]),
-                           "z": (0.5 * base_obj_size[2], 1.25 * base_obj_size[2])},
             "asset_cfg": SceneEntityCfg("obj"),
         },
     )

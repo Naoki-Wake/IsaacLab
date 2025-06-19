@@ -34,7 +34,7 @@ from isaaclab.controllers import DifferentialIKController, DifferentialIKControl
 from isaaclab.utils.math import subtract_frame_transforms, quat_error_magnitude, quat_mul, quat_conjugate, quat_from_euler_xyz
 from isaaclab_tasks.utils._math import euler_xyz_from_quat
 
-from isaaclab_tasks.utils.hand_utils import ReferenceTrajInfoMulti
+from isaaclab_tasks.utils.hand_utils import ReferenceTrajInfoMulti, CWPPredictor
 from isaaclab_tasks.utils.compute_relative_state import compute_object_state_in_hand_frame
 from .events import EventCfg, create_grasp_event_cfg
 from .robot_cfg import get_robot_cfg, RobotCfg
@@ -264,6 +264,13 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         self.mode = self.cfg.mode
 
+        self.cwp_predictor: CWPPredictor = CWPPredictor(
+            grasp_type=cfg.grasp_type,
+            robot_name=cfg.robot_name,
+            hand_laterality=self.activated_hand,
+            obj_type=cfg.object_type,
+            device=self.device,
+        )
         self.reference_traj_info = ReferenceTrajInfoMulti(
             keys=self.reference_traj_keys,
             num_envs=self.num_envs, device=self.device,
@@ -619,7 +626,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         # Refresh intermediate values for the specified environments
         self._compute_intermediate_values(env_ids)
-        # self._visualize()
 
         if not self.robot_cfg.off_camera_sensor:
             if self.robot_cfg.first_person_camera:
@@ -945,22 +951,30 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.activated_hand = hand_key if hand_key is not None else self.activated_hand
         # self.ref_target_pos[hand_key][env_ids] =
         # Reset the reference trajectory info for the specified environments
-        cwp_config = {
-            "num_envs": len(env_ids),
-            "obj_position": self.obj_pos[env_ids],
-            "obj_orientation": torch.tensor([1, 0, 0, 0], device=self.device).repeat(len(env_ids), 1),
-            "obj_scale": self._obj_scales[env_ids],
-        }
-
-        ref_traj_cfg = self.hand_util[hand_key].getReferenceTrajInfo(cwp_config, self.device)
-        cwp_position = ref_traj_cfg.pop("contact_web_position")
-
+        # cwp_config = {
+        #     "obj_position": self.obj_pos[env_ids],
+        #     "obj_orientation": torch.tensor([1, 0, 0, 0], device=self.device).repeat(len(env_ids), 1),
+        #     "obj_scale": self._obj_scales[env_ids],
+        # }
+        cwp = self.cwp_predictor.predict(
+            hand_laterality=self.activated_hand,
+            obj_position=self.obj_pos[env_ids],
+            obj_orientation=torch.tensor([1, 0, 0, 0], device=self.device).repeat(len(env_ids), 1),
+            obj_scale=self._obj_scales[env_ids],
+        )
+        ref_traj_cfg = self.hand_util[hand_key].getReferenceTrajInfo(
+            num_envs=len(env_ids), cwp=cwp, device=self.device
+        )
+        # cwp_position = ref_traj_cfg.pop("contact_web_position")
         # Set the reference target positions and finger positions
-        self.ref_finger_pos[hand_key][env_ids] = cwp_position
+
+        self.ref_finger_pos[hand_key][env_ids] = cwp["position"]
 
         self.reference_traj_info.update(hand_key, env_ids, **ref_traj_cfg, reset=True)
+        if self.mode == "demo":
+            self._visualize_cwp()
 
-    def _visualize(self, env_ids: torch.Tensor | None = None):
+    def _visualize_cwp(self, env_ids: torch.Tensor | None = None):
         if env_ids is None:
             env_ids = self._robot._ALL_INDICES
 
@@ -969,7 +983,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         all_marker_indices = []
 
         for cnt, k in enumerate(self.hand_util[self.activated_hand].position_tip_links):
-            pos = self.target_finger_pos[self.activated_hand][k][env_ids]  # (N, 3)
+            pos = self.ref_finger_pos[self.activated_hand][env_ids, cnt]  # (N, 3)
             ori = torch.tensor([[1, 0, 0, 0]], device=self.device).repeat(len(env_ids), 1)  # (N, 4)
             idx = torch.zeros(len(env_ids), dtype=torch.int64, device=self.device)  # (N,)
 

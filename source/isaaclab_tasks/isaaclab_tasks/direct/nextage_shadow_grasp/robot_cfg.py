@@ -17,7 +17,7 @@ class RobotCfg():
         if self.grasp_type == "active":
             self.action_scale = [0.01, 0.01, 0.01] + [0.0, 10.0 * DEG_TO_RAD, 0.0] + [20.0 * DEG_TO_RAD] * self.n_finger_joint + [1.0]
         elif self.grasp_type == "passive":
-            self.action_scale = [0.03, 0.03, 0.0] + [0.0, 0.0, 20.0 * DEG_TO_RAD] + [20.0 * DEG_TO_RAD] * self.n_finger_joint + [1.0]
+            self.action_scale = [0.01, 0.01, 0.0] + [0.0, 0.0, 10.0 * DEG_TO_RAD] + [20.0 * DEG_TO_RAD] * self.n_finger_joint + [1.0]
 
         self.contact_sensor: ContactSensorCfg = ContactSensorCfg(
             prim_path="/World/envs/env_.*/Robot/.*",

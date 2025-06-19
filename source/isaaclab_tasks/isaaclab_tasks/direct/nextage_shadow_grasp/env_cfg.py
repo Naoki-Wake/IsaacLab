@@ -47,11 +47,12 @@ class YCBObjCfg(ObjCfg):
         self._obj_cfg["obj"] = RigidObjectCfg(
             prim_path="/World/envs/env_.*/Object",  # Must match env pattern
             spawn=sim_utils.UsdFileCfg(
-                usd_path=f"source/isaaclab_assets/data/Props/035_power_drill.usd",
-                scale=(1, 1, 1),
+                # usd_path=f"source/isaaclab_assets/data/Props/035_power_drill.usd",
+                usd_path=f"source/isaaclab_assets/data/Props/021_bleach_cleaner.usd",
+                scale=(0.9, 0.9, 1.3),
                 # usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/YCB/Axis_Aligned/035_power_drill.usd",
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                    max_depenetration_velocity=2000,
+                    max_depenetration_velocity=1000,
                     disable_gravity=False,
                     rigid_body_enabled=True,
                     kinematic_enabled=False,
@@ -62,7 +63,7 @@ class YCBObjCfg(ObjCfg):
                     max_linear_velocity=100,
                     max_angular_velocity=100
                 ),
-                mass_props=sim_utils.MassPropertiesCfg(mass=0.1),
+                mass_props=sim_utils.MassPropertiesCfg(mass=0.01),
                 collision_props=sim_utils.CollisionPropertiesCfg(
                     collision_enabled=True
                 ),
