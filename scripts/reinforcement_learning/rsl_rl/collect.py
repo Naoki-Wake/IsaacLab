@@ -83,7 +83,7 @@ def main():
     env_cfg = parse_env_cfg(
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
-    env_cfg.is_training = False
+    env_cfg.mode = "collect"
     if args_cli.collect_data:
         env_cfg.is_data_collection = True
         env_cfg.off_camera_sensor = False

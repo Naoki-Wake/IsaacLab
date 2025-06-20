@@ -19,7 +19,7 @@ class ObjCfg():
             spawn=sim_utils.CuboidCfg(
                 size=table_size,
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                    disable_gravity=True,
+                    disable_gravity=False,
                 ),
                 mass_props=sim_utils.MassPropertiesCfg(mass=10000),
                 collision_props=sim_utils.CollisionPropertiesCfg(
