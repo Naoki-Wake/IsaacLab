@@ -41,7 +41,7 @@ class ReferenceTrajInfo:
         self.num_envs = num_envs
         self.hand_module = hand_module
         self.cwp_predictor = cwp_predictor
-        self.finger_coupling_rule = hand_module.couplingRuleTensor
+        # self.finger_coupling_rule = hand_module.couplingRuleTensor
         self.n_hand_joints = len(hand_module.hand_full_joint_names)
 
         # persistent state -------------------------------------------------
@@ -147,7 +147,8 @@ class ReferenceTrajInfo:
         joints = self._lerp(self.hand_preshape_joint[idx], self.hand_shape_joint[idx], ratio)
         if dJ is not None:
             joints += dJ
-        return self.finger_coupling_rule(joints).float()
+        return joints.float()
+        # return self.finger_coupling_rule(joints).float()
 
     # ------------------------------------------------------------------
     #  phase handlers
@@ -157,6 +158,7 @@ class ReferenceTrajInfo:
         _init_pos, _init_quat = torch.tensor(_init_pos, device=self.device), torch.tensor(_init_quat, device=self.device)
         pos  = _init_pos.expand(len(idx), 3)
         quat = _init_quat.expand(len(idx), 4)
+        raise NotImplementedError("The init phase is not implemented in this class.")
         fingers = self.finger_coupling_rule(self.default_open_pose.expand(len(idx), -1))
         return pos, quat, fingers
 
@@ -185,7 +187,7 @@ class ReferenceTrajInfo:
         fingers   = self._interp_fingers(idx, ratio, action_hand_joint)
         return pos, quat, fingers
 
-    def _h_bring(self, idx, ratio, params, current_handP_world=None, current_handQ_world=None, action_hand_joint=None, **_):
+    def _h_bring(self, idx, ratio, params, current_handP_world=None, current_handQ_world=None, **_):
         delta_list = params["delta"]
         delta = torch.tensor(delta_list, device=self.device).unsqueeze(0)
         first = torch.logical_and(ratio > 0, ~self.pick_flg[idx])
@@ -194,14 +196,15 @@ class ReferenceTrajInfo:
             self.handQ_world[idx[first]] = current_handQ_world[first]
             self.pick_flg[idx[first]]    = True
         pos, quat = self._interp_eef(idx, ratio)
-        fingers   = self._interp_fingers(idx, torch.ones_like(ratio), action_hand_joint)
+        fingers   = self._interp_fingers(idx, torch.ones_like(ratio))
         return pos, quat, fingers
 
     def _h_release(self, idx, ratio, params, current_hand_joint, **_):
         pos, quat = self._interp_eef(idx, torch.ones_like(ratio))
         if ratio.ndim == 1:
             ratio = ratio[:, None]
-        fingers = self.finger_coupling_rule(self._lerp(current_hand_joint, self.default_open_pose.expand(len(idx), -1), ratio))
+        # fingers = self.finger_coupling_rule(self._lerp(current_hand_joint, self.default_open_pose.expand(len(idx), -1), ratio))
+        raise NotImplementedError("The release phase is not implemented in this class.")
         return pos, quat, fingers
 
     # ------------------------------------------------------------------
