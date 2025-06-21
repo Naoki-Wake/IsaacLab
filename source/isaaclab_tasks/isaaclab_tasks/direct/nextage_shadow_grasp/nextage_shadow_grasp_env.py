@@ -675,12 +675,12 @@ class NextageShadowGraspEnv(DirectRLEnv):
         cur_eef_pos, cur_eef_rot = self._get_current_eef_pose(self.activated_hand)
         obs = torch.cat(
             (
-                _to_local(cur_eef_pos),
-                cur_eef_rot,
-                _to_local(self.obj_pos),
-                self.obj_rot,
-                # self.hand2obj[key]["pos"],
-                # self.hand2obj[key]["quat"],
+                # _to_local(cur_eef_pos),
+                # cur_eef_rot,
+                # _to_local(self.obj_pos),
+                # self.obj_rot,
+                self.hand2obj[key]["pos"],
+                self.hand2obj[key]["quat"],
                 dof_pos_scaled,
                 *diff_finger,
                 finger_effort,

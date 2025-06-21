@@ -14,10 +14,16 @@ class RobotCfg():
     def __init__(self, grasp_type: str = "active", mode: str = None):
         self.grasp_type = grasp_type
         self.action_space = 6 + self.n_finger_joint + 1 # [x, y, z, roll, pitch, yaw] + [n_finger_joint joints] + [terminate]
+        finger_action_scale = [
+            20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 1.0,
+            0, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 1.0,
+            20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 1.0,
+            20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD
+        ]
         if self.grasp_type == "active":
-            self.action_scale = [0.015, 0.015, 0.015] + [0.0, 10.0 * DEG_TO_RAD, 0.0] + [20.0 * DEG_TO_RAD] * self.n_finger_joint + [1.0]
+            self.action_scale = [0.01, 0.01, 0.01] + [0.0, 10.0 * DEG_TO_RAD, 0.0] + finger_action_scale + [1.0]
         elif self.grasp_type == "passive":
-            self.action_scale = [0.01, 0.01, 0.0] + [0.0, 0.0, 10.0 * DEG_TO_RAD] + [20.0 * DEG_TO_RAD] * self.n_finger_joint + [1.0]
+            self.action_scale = [0.01, 0.01, 0.0] + [0.0, 0.0, 10.0 * DEG_TO_RAD] + finger_action_scale + [1.0]
 
         self.contact_sensor: ContactSensorCfg = ContactSensorCfg(
             prim_path="/World/envs/env_.*/Robot/.*",

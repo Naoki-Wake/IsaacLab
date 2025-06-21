@@ -41,7 +41,8 @@ class ReferenceTrajInfo:
         self.num_envs = num_envs
         self.hand_module = hand_module
         self.cwp_predictor = cwp_predictor
-        # self.finger_coupling_rule = hand_module.couplingRuleTensor
+        self.finger_coupling_rule = hand_module.couplingRuleTensor
+        self.finger_decoupling_rule = hand_module.decouplingRuleTensor
         self.n_hand_joints = len(hand_module.hand_full_joint_names)
 
         # persistent state -------------------------------------------------
@@ -71,8 +72,8 @@ class ReferenceTrajInfo:
             subtasks = [
                 # {"name": "init",     "start": 0.00, "end": 0.05},
                 {"name": "approach", "start": 0.00, "end": 0.50},
-                {"name": "grasp",    "start": 0.50, "end": 0.80},
-                {"name": "bring",     "start": 0.80, "end": 1.00,
+                {"name": "grasp",    "start": 0.50, "end": 0.90},
+                {"name": "bring",     "start": 0.90, "end": 1.00,
                  "param": {"delta": [0.0, 0.0, pick_height]}},
                 # {"name": "release",  "start": 0.80, "end": 1.00,
                 #  "param": {"open_pose": open_pose.tolist()}},
@@ -147,8 +148,8 @@ class ReferenceTrajInfo:
         joints = self._lerp(self.hand_preshape_joint[idx], self.hand_shape_joint[idx], ratio)
         if dJ is not None:
             joints += dJ
-        return joints.float()
-        # return self.finger_coupling_rule(joints).float()
+        # return joints.float()
+        return self.finger_coupling_rule(joints).float()
 
     # ------------------------------------------------------------------
     #  phase handlers
@@ -186,13 +187,14 @@ class ReferenceTrajInfo:
         fingers   = self._interp_fingers(idx, ratio, action_hand_joint)
         return pos, quat, fingers
 
-    def _h_bring(self, idx, ratio, params, current_handP_world=None, current_handQ_world=None, **_):
+    def _h_bring(self, idx, ratio, params, current_handP_world=None, current_handQ_world=None, current_hand_joint=None, **_):
         delta_list = params["delta"]
         delta = torch.tensor(delta_list, device=self.device).unsqueeze(0)
         first = torch.logical_and(ratio > 0, ~self.pick_flg[idx])
         if first.any():
             self.handP_world[idx[first]] = current_handP_world[first] + delta
             self.handQ_world[idx[first]] = current_handQ_world[first]
+            self.hand_shape_joint[idx[first]] = self.finger_decoupling_rule(current_hand_joint[first])
             self.pick_flg[idx[first]]    = True
         pos, quat = self._interp_eef(idx, ratio)
         fingers   = self._interp_fingers(idx, torch.ones_like(ratio))
@@ -239,7 +241,7 @@ class ReferenceTrajInfo:
             idx_chg = env_idx[changed]
             self.handP_world_pre[idx_chg]     = current_handP_world[changed]
             self.handQ_world_pre[idx_chg]     = current_handQ_world[changed]
-            self.hand_preshape_joint[idx_chg] = current_hand_joint[changed]
+            self.hand_preshape_joint[idx_chg] = self.finger_decoupling_rule(current_hand_joint[changed])
             # self.hand_shape_joint[idx_chg]    = current_hand_joint[changed]
             self.pick_flg[idx_chg]            = False
             self.approach_flg[idx_chg]        = False

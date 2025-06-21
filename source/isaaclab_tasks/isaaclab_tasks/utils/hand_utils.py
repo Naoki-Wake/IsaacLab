@@ -261,7 +261,7 @@ class HandUtils:
         """Get the parameters for the reference trajectory based on the grasp type."""
         param = {}
         if grasp_type == "active":
-            param["grasp_approach_vertical"] = np.random.uniform(90, 95, size=num_envs).tolist()
+            param["grasp_approach_vertical"] = np.random.uniform(90, 110, size=num_envs).tolist()
             param["grasp_approach_horizontal"] = np.zeros(num_envs).tolist()
         elif grasp_type == "passive":
             param["grasp_approach_vertical"] = np.zeros(num_envs).tolist()
@@ -489,21 +489,48 @@ class ShadowHandUtils(HandUtils):
             ff4 = jv[:, 0]
             ff3 = jv[:, 1]
             ff2 = jv[:, 2]
-            ff1 = torch.clamp(jv[:, 3], min=torch.zeros_like(jv[:, 3])) * ff2
+            ff1 = torch.clamp(jv[:, 3], min=torch.zeros_like(jv[:, 3]), max=torch.ones_like(jv[:, 3])) * ff2
             mf4 = torch.zeros_like(jv[:, 4])
             mf3 = jv[:, 5]
             mf2 = jv[:, 6]
-            mf1 = torch.clamp(jv[:, 7], min=torch.zeros_like(jv[:, 7])) * mf2
+            mf1 = torch.clamp(jv[:, 7], min=torch.zeros_like(jv[:, 7]), max=torch.ones_like(jv[:, 7])) * mf2
             rf4 = jv[:, 8]
             rf3 = jv[:, 9]
             rf2 = jv[:, 10]
-            rf1 = torch.clamp(jv[:, 11], min=torch.zeros_like(jv[:, 11])) * rf2
+            rf1 = torch.clamp(jv[:, 11], min=torch.zeros_like(jv[:, 11]), max=torch.ones_like(jv[:, 11])) * rf2
             th5 = jv[:, 12]
             th4 = jv[:, 13]
             th2 = jv[:, 14]
             th1 = jv[:, 15]
             js = torch.stack((ff4, ff3, ff2, ff1, mf4, mf3, mf2, mf1, rf4, rf3, rf2, rf1, th5, th4, th2, th1), dim=1)
         return js
+
+    def decouplingRuleTensor(self, jv):
+        """Decoupling rule for the hand joint velocities."""
+        if jv.shape[1] == 8:
+            raise ValueError("Decoupling rule is not defined for 8-dimensional joint velocities. Use 16-dimensional joint velocities instead.")
+        elif jv.shape[1] == 16:
+            ff4 = jv[:, 0]
+            ff3 = jv[:, 1]
+            ff2 = jv[:, 2]
+            ff_rate = torch.where(jv[:, 2] != 0, jv[:, 3] / jv[:, 2], torch.zeros_like(jv[:, 2]))
+            mf4 = torch.zeros_like(jv[:, 4])
+            mf3 = jv[:, 5]
+            mf2 = jv[:, 6]
+            mf_rate = torch.where(jv[:, 6] != 0, jv[:, 7] / jv[:, 6], torch.zeros_like(jv[:, 6]))
+            rf4 = jv[:, 8]
+            rf3 = jv[:, 9]
+            rf2 = jv[:, 10]
+            rf_rate = torch.where(jv[:, 10] != 0, jv[:, 11] / jv[:, 10], torch.zeros_like(jv[:, 10]))
+            th5 = jv[:, 12]
+            th4 = jv[:, 13]
+            th2 = jv[:, 14]
+            th1 = jv[:, 15]
+            return torch.stack(
+                (ff4, ff3, ff2, ff_rate, mf4, mf3, mf2, mf_rate, rf4, rf3, rf2, rf_rate, th5, th4, th2, th1), dim=1
+            )
+        else:
+            raise ValueError(f"Unsupported joint velocity shape: {jv.shape}")
 
 class HondaHandUtils(HandUtils):
     def __init__(self, grasp_type):
