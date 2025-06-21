@@ -158,8 +158,7 @@ class ReferenceTrajInfo:
         _init_pos, _init_quat = torch.tensor(_init_pos, device=self.device), torch.tensor(_init_quat, device=self.device)
         pos  = _init_pos.expand(len(idx), 3)
         quat = _init_quat.expand(len(idx), 4)
-        raise NotImplementedError("The init phase is not implemented in this class.")
-        fingers = self.finger_coupling_rule(self.default_open_pose.expand(len(idx), -1))
+        fingers = self.default_open_pose.expand(len(idx), -1)
         return pos, quat, fingers
 
     def _h_approach(self, idx, ratio, params, action_handP=None, action_handQ=None, action_hand_joint=None, **_):
@@ -203,8 +202,7 @@ class ReferenceTrajInfo:
         pos, quat = self._interp_eef(idx, torch.ones_like(ratio))
         if ratio.ndim == 1:
             ratio = ratio[:, None]
-        # fingers = self.finger_coupling_rule(self._lerp(current_hand_joint, self.default_open_pose.expand(len(idx), -1), ratio))
-        raise NotImplementedError("The release phase is not implemented in this class.")
+        fingers = self._lerp(current_hand_joint, self.default_open_pose.expand(len(idx), -1), ratio)
         return pos, quat, fingers
 
     # ------------------------------------------------------------------
