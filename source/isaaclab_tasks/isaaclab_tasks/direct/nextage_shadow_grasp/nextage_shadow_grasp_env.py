@@ -61,7 +61,7 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     # "trian or "eval" or "collect"
 
     episode_length_s = 3
-    decimation = 16
+    decimation = 8
     observation_space = 58
     state_space = 0
     action_space = 0

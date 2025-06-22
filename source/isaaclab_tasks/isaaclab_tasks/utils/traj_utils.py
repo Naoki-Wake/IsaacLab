@@ -73,8 +73,10 @@ class ReferenceTrajInfo:
                 # {"name": "init",     "start": 0.00, "end": 0.05},
                 {"name": "approach", "start": 0.00, "end": 0.40},
                 {"name": "grasp",    "start": 0.40, "end": 0.80},
-                {"name": "bring",     "start": 0.80, "end": 1.00,
+                {"name": "bring",     "start": 0.80, "end": 0.9,
                  "param": {"delta": [0.0, 0.0, pick_height]}},
+                {"name": "bring",     "start": 0.9, "end": 1.00,
+                 "param": {"delta": [0.0, 0.0, 0.0]}},
                 # {"name": "release",  "start": 0.80, "end": 1.00,
                 #  "param": {"open_pose": open_pose.tolist()}},
             ]
