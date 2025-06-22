@@ -71,9 +71,9 @@ class ReferenceTrajInfo:
         if mode == "train":
             subtasks = [
                 # {"name": "init",     "start": 0.00, "end": 0.05},
-                {"name": "approach", "start": 0.00, "end": 0.50},
-                {"name": "grasp",    "start": 0.50, "end": 0.90},
-                {"name": "bring",     "start": 0.90, "end": 1.00,
+                {"name": "approach", "start": 0.00, "end": 0.40},
+                {"name": "grasp",    "start": 0.40, "end": 0.80},
+                {"name": "bring",     "start": 0.80, "end": 1.00,
                  "param": {"delta": [0.0, 0.0, pick_height]}},
                 # {"name": "release",  "start": 0.80, "end": 1.00,
                 #  "param": {"open_pose": open_pose.tolist()}},
@@ -138,6 +138,7 @@ class ReferenceTrajInfo:
         quat = quat_slerp_batch(self.handQ_world_pre[idx], self.handQ_world[idx], ratio)
         if dP is not None:
             pos += dP
+
         if dQ is not None:
             quat = quat_mul(dQ, quat)
         return pos.float(), quat.float()
@@ -243,6 +244,7 @@ class ReferenceTrajInfo:
             self.handQ_world_pre[idx_chg]     = current_handQ_world[changed]
             self.hand_preshape_joint[idx_chg] = self.finger_decoupling_rule(current_hand_joint[changed])
             # self.hand_shape_joint[idx_chg]    = current_hand_joint[changed]
+
             self.pick_flg[idx_chg]            = False
             self.approach_flg[idx_chg]        = False
             self.phase_idx[idx_chg]           = new_phase[changed]

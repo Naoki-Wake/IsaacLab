@@ -1,6 +1,6 @@
 export HYDRA_FULL_ERROR=1
 export DOCKER_ISAACLAB_PATH=.
-export DISPLAY=:0
+export DISPLAY=:1
 
 DEBUG=n
 GRASP_TYPE=active
@@ -12,7 +12,7 @@ EXPERIMENT_NAME="${ROBOT_NAME}-${GRASP_TYPE}-${OBJ_TYPE}"
 RUN_NAME="$(hostname)-n${NUM_ENVS}"
 
 if [ "${DEBUG}" == "t" ]; then
-    NUM_ENVS=2
+    NUM_ENVS=5
     ARGS=""
 else
     NUM_ENVS=1024

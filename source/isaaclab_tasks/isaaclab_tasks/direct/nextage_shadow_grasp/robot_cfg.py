@@ -15,9 +15,9 @@ class RobotCfg():
         self.grasp_type = grasp_type
         self.action_space = 6 + self.n_finger_joint + 1 # [x, y, z, roll, pitch, yaw] + [n_finger_joint joints] + [terminate]
         finger_action_scale = [
-            20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 1.0,
-            0, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 1.0,
-            20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 1.0,
+            20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 0.3,
+            0, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 0.3,
+            20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 0.3,
             20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD
         ]
         if self.grasp_type == "active":

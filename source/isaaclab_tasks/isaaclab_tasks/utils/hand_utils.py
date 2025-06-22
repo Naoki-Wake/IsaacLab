@@ -261,7 +261,7 @@ class HandUtils:
         """Get the parameters for the reference trajectory based on the grasp type."""
         param = {}
         if grasp_type == "active":
-            param["grasp_approach_vertical"] = np.random.uniform(90, 110, size=num_envs).tolist()
+            param["grasp_approach_vertical"] = np.random.uniform(90, 90, size=num_envs).tolist()
             param["grasp_approach_horizontal"] = np.zeros(num_envs).tolist()
         elif grasp_type == "passive":
             param["grasp_approach_vertical"] = np.zeros(num_envs).tolist()
