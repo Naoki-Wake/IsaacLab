@@ -21,8 +21,8 @@ def create_grasp_event_cfg(base_obj_size, object_type, grasp_type, mode):
 
     if grasp_type == "passive":
         scale_range = {
-            "x": (1.0 * base_obj_size[0], 1.0 * base_obj_size[0]),
-            "y": (1.0 * base_obj_size[1], 1.0 * base_obj_size[1]),
+            "x": (1.0 * base_obj_size[0], 1.25 * base_obj_size[0]),
+            "y": (1.0 * base_obj_size[1], 1.25 * base_obj_size[1]),
             "z": (0.5 * base_obj_size[2], 1.25 * base_obj_size[2])
         }
     else:
