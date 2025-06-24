@@ -929,15 +929,15 @@ class NextageShadowGraspEnv(DirectRLEnv):
             torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg[key])
         )
         is_grasped = torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg[key])
-        is_grasped_full = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold * 0.8)
-        is_grasped_half = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold / 2 * 0.8)
+        is_picked_full = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold * 0.8)
+        is_picked_half = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold / 2 * 0.8)
 
-        self.is_grasped_buf[:] = is_grasped_full
+        self.is_grasped_buf[:] = is_picked_full
 
         grasp_success_bonus = torch.where(
-            is_grasped_full,
-            torch.ones_like(is_grasped_full) * torch.clamp(obj_z_pos / self.cfg.height_bonus_threshold, max=1) * self.cfg.grasp_reward_scale,
-            torch.zeros_like(is_grasped_full)
+            is_grasped,
+            torch.ones_like(is_grasped) * torch.clamp(obj_z_pos / self.cfg.height_bonus_threshold, max=1) * self.cfg.grasp_reward_scale,
+            torch.zeros_like(is_grasped)
         )
 
         rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward + obj_rot_penalty#  + force_penalty
@@ -950,7 +950,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
                 return x.float().mean().item()
             return x if isinstance(x, (int, float)) else 0.0
 
-        self.extras["success"] = is_grasped_full
+        self.extras["success"] = is_picked_full
         self.extras["contact_info"] = {
             "is_contact": is_contact,
             "net_contact_forces": self.net_contact_forces,
@@ -963,8 +963,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
             "grasp_reward": safe_mean(grasp_success_bonus),
             "vel_penalty": safe_mean(vel_penalty),
             "obj_rot_penalty": safe_mean(obj_rot_penalty),
-            "num_grasped": safe_mean(is_grasped_full, mask=self.reference_traj_info.pick_flg[key]),
-            "num_grasped_half": safe_mean(is_grasped_half, mask=self.reference_traj_info.pick_flg[key]),
+            "num_grasped": safe_mean(is_picked_full, mask=self.reference_traj_info.pick_flg[key]),
+            "num_grasped_half": safe_mean(is_picked_half, mask=self.reference_traj_info.pick_flg[key]),
             "z_pos_reward": safe_mean(obj_z_pos_reward, mask=self.reference_traj_info.pick_flg[key]),
             "contacts_reward": safe_mean(contacts_reward),
             "force_penalty": safe_mean(force_penalty),
