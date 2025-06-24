@@ -121,10 +121,10 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
             #     visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0)),
             # ),
             "contact_arrow": sim_utils.ConeCfg(
-                radius=0.04,
-                height=0.04,
+                radius=0.015,
+                height=0.02,
                 axis="Z",
-                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 0.0)),
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0)),
             ),
         }
     )
@@ -164,7 +164,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
     def __init__(self, cfg: NextageShadowGraspEnvCfg, render_mode: str | None = None, **kwargs):
         self.robot_cfg: RobotCfg = get_robot_cfg(cfg.robot_name, cfg.grasp_type, cfg.mode)
-        self.env_cfg: ObjCfg = get_obj_cfg(cfg.object_type, cfg.grasp_type)
+        self.env_cfg: ObjCfg = get_obj_cfg(cfg.mode, cfg.object_type, cfg.grasp_type)
         cfg.action_space = self.robot_cfg.action_space
         cfg.events = create_grasp_event_cfg(base_obj_size=self.env_cfg.obj_size_half, object_type=cfg.object_type, grasp_type=cfg.grasp_type, mode=cfg.mode)
 
@@ -281,7 +281,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
             hand_module=self.hand_util,
             cwp_predictor=self.cwp_predictor,
             mode=self.mode,
-            pick_height=self.cfg.height_bonus_threshold
+            pick_height=self.cfg.height_bonus_threshold,
+            env_origins=self.scene.env_origins
         )
         # add variables for Eureka reference
         self.is_grasped_buf = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -787,8 +788,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
         }
         contact_center = self.reference_traj_info.contact_center_world[key]
         self.hand2obj[key] = compute_object_state_in_hand_frame(
-            # self._obj.data.root_pos_w,  self._obj.data.root_quat_w,
-            contact_center, self.obj_rot,
+            self._obj.data.root_pos_w,  self._obj.data.root_quat_w,
+            #contact_center, self.obj_rot,
             self._obj.data.root_lin_vel_w, self._obj.data.root_ang_vel_w,
             self._robot.data.body_pos_w[:, self.eef_link_idx[key]], self._robot.data.body_quat_w[:, self.eef_link_idx[key]],
             self._robot.data.body_lin_vel_w[:, self.eef_link_idx[key]], self._robot.data.body_ang_vel_w[:, self.eef_link_idx[key]],

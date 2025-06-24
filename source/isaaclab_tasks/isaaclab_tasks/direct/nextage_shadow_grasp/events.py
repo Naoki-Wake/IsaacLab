@@ -34,8 +34,8 @@ def create_grasp_event_cfg(base_obj_size, object_type, grasp_type, mode):
         if mode == "demo":
             # For demo mode, we use a smaller scale range to ensure the object is not too large.
             scale_range = {
-                "x": (1.0 * base_obj_size[0], 1.0 * base_obj_size[0]),
-                "y": (2.0 * base_obj_size[1], 2.0 * base_obj_size[1]),
+                "x": (0.9 * base_obj_size[0], 0.9 * base_obj_size[0]),
+                "y": (1.5 * base_obj_size[1], 1.5 * base_obj_size[1]),
                 "z": (0.5 * base_obj_size[2], 1.0 * base_obj_size[2])
             }
 

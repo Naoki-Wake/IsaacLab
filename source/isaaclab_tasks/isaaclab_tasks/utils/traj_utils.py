@@ -35,7 +35,8 @@ class ReferenceTrajInfo:
         hand_module,
         cwp_predictor,
         mode: str,
-        pick_height: float
+        pick_height: float,
+        env_origins: torch.Tensor | None = None,
     ) -> None:
         self.device = device
         self.num_envs = num_envs
@@ -60,6 +61,8 @@ class ReferenceTrajInfo:
 
         self.hand_preshape_joint = torch.zeros((num_envs, self.n_hand_joints), device=device)
         self.hand_shape_joint    = torch.zeros((num_envs, self.n_hand_joints), device=device)
+
+        self.env_origins = env_origins
 
         self.phase_idx = -torch.ones(num_envs, dtype=torch.long , device=device)
         self.pick_flg  = torch.zeros(num_envs, dtype=torch.bool, device=device)
@@ -103,7 +106,7 @@ class ReferenceTrajInfo:
                 ]
             else:
                 subtasks = [
-                    # {"name": "init",     "start": 0.00, "end": 0.05, "param": {"init_pose": ([0.0, 0.0, 0.9], [1.0, 0.0, 0.0, 0.0])}},
+                    {"name": "init",     "start": 0.00, "end": 0.05, "param": {"init_pose": ([0.0, -0.5, 1.5], [0.1228, 0.6964, 0.6964, 0.1228])}},
                     {"name": "approach", "start": 0.4, "end": 0.5},
                     {"name": "grasp",    "start": 0.5, "end": 0.6},
                     {"name": "bring",     "start": 0.6, "end": 1.0,  "param": {"delta": [0.0, 0.0, 0.0]}},
@@ -163,7 +166,7 @@ class ReferenceTrajInfo:
     def _h_init(self, idx, ratio, params, **_):
         _init_pos, _init_quat = params["init_pose"]
         _init_pos, _init_quat = torch.tensor(_init_pos, device=self.device), torch.tensor(_init_quat, device=self.device)
-        pos  = _init_pos.expand(len(idx), 3)
+        pos  = _init_pos.expand(len(idx), 3) + self.env_origins[idx] # world coordinates
         quat = _init_quat.expand(len(idx), 4)
         fingers = self.default_open_pose.expand(len(idx), -1)
         return pos, quat, fingers
@@ -305,7 +308,7 @@ class ReferenceTrajInfo:
         self.contact_center_world[env_ids] = contact_center
 
 class ReferenceTrajInfoMulti():
-    def __init__(self, keys, num_envs, device, hand_module, cwp_predictor, mode: str, pick_height:float=0.05):
+    def __init__(self, keys, num_envs, device, hand_module, cwp_predictor, mode: str, pick_height:float=0.05, env_origins: torch.Tensor | None = None):
         self._keys = keys
         self.device = device
         self.ref_traj_info = {
@@ -313,7 +316,8 @@ class ReferenceTrajInfoMulti():
                 num_envs, device,
                 hand_module[key],
                 cwp_predictor[key],
-                mode, pick_height
+                mode, pick_height,
+                env_origins
             ) for key in keys
         }
 

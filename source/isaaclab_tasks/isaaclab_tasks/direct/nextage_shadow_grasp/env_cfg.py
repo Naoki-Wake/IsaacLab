@@ -7,8 +7,9 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.assets import RigidObject, RigidObjectCfg
 
 class ObjCfg():
-    def __init__(self, grasp_type: str = "active"):
+    def __init__(self, mode: str, grasp_type: str = "active"):
         self.obj_type = "base"
+        self.mode = mode
         self.grasp_type = grasp_type
         self.obj_size_half: tuple[float, float, float] = (0.05, 0.05, 0.05)  # Half size for cuboid objects
         self._obj_cfg = {}
@@ -40,8 +41,8 @@ class ObjCfg():
 
 
 class YCBObjCfg(ObjCfg):
-    def __init__(self, grasp_type: str = "active"):
-        super().__init__(grasp_type=grasp_type)
+    def __init__(self, mode: str, grasp_type: str = "active"):
+        super().__init__(mode=mode, grasp_type=grasp_type)
         self.obj_type = "ycb"
 
         self._obj_cfg["obj"] = RigidObjectCfg(
@@ -49,7 +50,7 @@ class YCBObjCfg(ObjCfg):
             spawn=sim_utils.UsdFileCfg(
                 # usd_path=f"source/isaaclab_assets/data/Props/035_power_drill.usd",
                 usd_path=f"source/isaaclab_assets/data/Props/021_bleach_cleaner.usd",
-                scale=(0.9, 0.9, 0.9),
+                scale=(0.8, 1.3, 1.3),  # Scale the object to fit the scene
                 # usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/YCB/Axis_Aligned/035_power_drill.usd",
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(
                     max_depenetration_velocity=1000,
@@ -76,8 +77,8 @@ class YCBObjCfg(ObjCfg):
         )
 
 class SQObjCfg(ObjCfg):
-    def __init__(self, grasp_type: str = "active"):
-        super().__init__(grasp_type=grasp_type)
+    def __init__(self, mode: str, grasp_type: str = "active"):
+        super().__init__(mode=mode, grasp_type=grasp_type)
         self.obj_type = "superquadric"
         if self.grasp_type == "active":
             self.obj_size_half = (0.035, 0.08, 0.08)  # Size of the cuboid obj in meters
@@ -108,7 +109,7 @@ class SQObjCfg(ObjCfg):
                     max_linear_velocity=100,
                     max_angular_velocity=100
                 ),
-                mass_props=sim_utils.MassPropertiesCfg(mass=0.1),
+                mass_props=sim_utils.MassPropertiesCfg(mass=0.01 if self.mode == "demo" else 0.1),
                 collision_props=sim_utils.CollisionPropertiesCfg(
                     collision_enabled=True
                 ),
@@ -120,11 +121,11 @@ class SQObjCfg(ObjCfg):
             )
         )
 
-def get_obj_cfg(obj_type: str, grasp_type: str = "active") -> ObjCfg:
+def get_obj_cfg(mode: str, obj_type: str, grasp_type: str = "active") -> ObjCfg:
     """Get the object configuration based on the type."""
     if obj_type == "ycb":
-        return YCBObjCfg(grasp_type=grasp_type)
+        return YCBObjCfg(mode=mode, grasp_type=grasp_type)
     elif obj_type == "superquadric":
-        return SQObjCfg(grasp_type=grasp_type)
+        return SQObjCfg(mode=mode, grasp_type=grasp_type)
     else:
         raise ValueError(f"Unsupported object type: {obj_type}. Supported types are 'ycb' and 'superquadric'.")

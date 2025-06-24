@@ -594,9 +594,9 @@ class CWPPredictor(object):
             ], dim=1)  # shape: [N, 4, 3]
             if self.mode == "demo":
                 if self.hand_laterality == "right":
-                    offset = torch.Tensor([0.0, -0.05, 0.0]).to(self.device)
+                    offset = torch.Tensor([-0.01, -0.05, -0.03]).to(self.device)
                 else:
-                    offset = torch.Tensor([0.0, 0.05, 0.0]).to(self.device)
+                    offset = torch.Tensor([0.0, 0.05, -0.01]).to(self.device)
 
         elif self.grasp_type == "passive":
             half_z = 0.5 * obj_scale[:, 2]
@@ -622,7 +622,7 @@ class CWPPredictor(object):
                 torch.stack([-obj_scale[:, 0], torch.zeros_like(height), height], dim=1)           # rh_thdistal
             ], dim=1)  # shape: [N, 4, 3]
             if self.hand_laterality == "right":
-                offset = torch.Tensor([0.0, -0.05, 0.0]).to(self.device)
+                offset = torch.Tensor([-0.02, -0.05, 0.0]).to(self.device)
             else:
                 offset = torch.Tensor([0.0, 0.08, 0.0]).to(self.device)
         elif self.grasp_type == "passive":
