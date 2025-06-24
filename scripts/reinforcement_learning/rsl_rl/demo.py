@@ -79,8 +79,8 @@ def main():
     env_cfg.mode = "demo"
     # env_cfg.off_camera_sensor = False
     env_cfg.robot_name = "shadow-multi"
-    env_cfg.object_type = "superquadric"  # or "superquadric"
-    env_cfg.episode_length_s *= 10
+    env_cfg.object_type = "superquadric"
+    env_cfg.episode_length_s *= 8
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # specify directory for logging experiments
@@ -111,6 +111,7 @@ def main():
 
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
     # load previously trained model
+
     ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     ppo_runner.load(resume_path)
 
@@ -137,6 +138,8 @@ def main():
 
     # reset environment
     obs, extras = env.get_observations()
+    if len(base_env.reference_traj_keys) > 1:
+        obs = torch.stack([obs for _ in range(len(base_env.reference_traj_keys))], dim=0)
     timestep = 0
     # simulate environment
     time.sleep(2.0)
@@ -145,8 +148,10 @@ def main():
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():
-            # agent stepping
-            actions = policy(obs)
+            actions = [
+                policy(obs[hand_idx]) for hand_idx, hand_key in enumerate(base_env.reference_traj_keys)
+            ]
+            actions = torch.stack(actions, dim=0)
             # env stepping
             obs, rewards, dones, extras = env.step(actions)
 
@@ -164,6 +169,7 @@ def main():
         timestep += 1
     # close the simulator
     env.close()
+
 
 if __name__ == "__main__":
     # run the main function

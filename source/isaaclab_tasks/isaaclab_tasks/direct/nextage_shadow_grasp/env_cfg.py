@@ -49,7 +49,7 @@ class YCBObjCfg(ObjCfg):
             spawn=sim_utils.UsdFileCfg(
                 # usd_path=f"source/isaaclab_assets/data/Props/035_power_drill.usd",
                 usd_path=f"source/isaaclab_assets/data/Props/021_bleach_cleaner.usd",
-                scale=(0.9, 0.9, 1.3),
+                scale=(0.9, 0.9, 0.9),
                 # usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/YCB/Axis_Aligned/035_power_drill.usd",
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(
                     max_depenetration_velocity=1000,

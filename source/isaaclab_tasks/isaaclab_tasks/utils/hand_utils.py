@@ -325,6 +325,7 @@ class HandUtils:
             "handQ_world_pre": _xyzw2wxyz(handQ_world_pre),
             "hand_preshape_joint": self.preshape_joint,
             "hand_shape_joint": self.shape_joint,
+            "contact_center": config["contact_center"],
         }
 
     def _compute_contactP_atload(self, handQ_world, skip=False):
@@ -563,12 +564,13 @@ class HondaHandUtils(HandUtils):
         return np.array([0.0, 0.0, 0.0])
 
 class CWPPredictor(object):
-    def __init__(self, grasp_type, robot_name, hand_laterality="right", obj_type="superquadric", device="cpu"):
+    def __init__(self, mode, grasp_type, robot_name, hand_laterality="right", obj_type="superquadric", device="cpu"):
         self.device = device
         self.grasp_type = grasp_type
         self.robot_name = robot_name
         self.obj_type = obj_type
         self.hand_laterality = hand_laterality
+        self.mode = mode
 
     def predict(self, obj_position, obj_orientation, obj_scale):
         if self.obj_type == "superquadric":
@@ -582,6 +584,7 @@ class CWPPredictor(object):
         # obj_scale: shape [N, 3] = [N, x, y, z]
         # device: self.device
         height = torch.clamp(obj_scale[:, 2] - 0.03, min=0.0)  # [N]
+        offset = torch.zeros(3, device=self.device)  # default offset
         if self.grasp_type == "active":
             finger_offset = torch.stack([
                 torch.stack([obj_scale[:, 0], 0.5 * obj_scale[:, 1], height], dim=1),               # rh_ffdistal
@@ -589,6 +592,11 @@ class CWPPredictor(object):
                 torch.stack([obj_scale[:, 0], -0.5 * obj_scale[:, 1], height], dim=1),              # rh_rfdistal
                 torch.stack([-obj_scale[:, 0], torch.zeros_like(height), height], dim=1)           # rh_thdistal
             ], dim=1)  # shape: [N, 4, 3]
+            if self.mode == "demo":
+                if self.hand_laterality == "right":
+                    offset = torch.Tensor([0.0, -0.05, 0.0]).to(self.device)
+                else:
+                    offset = torch.Tensor([0.0, 0.05, 0.0]).to(self.device)
 
         elif self.grasp_type == "passive":
             half_z = 0.5 * obj_scale[:, 2]
@@ -599,7 +607,8 @@ class CWPPredictor(object):
                 torch.stack([-obj_scale[:, 0], torch.zeros_like(half_z), torch.zeros_like(half_z)], dim=1), # rh_thdistal
                 torch.stack([torch.zeros_like(half_z), -obj_scale[:, 1], torch.zeros_like(half_z)], dim=1)  # rh_palm
             ], dim=1)  # shape: [N, 5, 3]
-        return {"position": obj_position[:, None] + finger_offset, "orientation": obj_orientation}
+        obj_position = obj_position[:, None] + finger_offset + offset[None, None]
+        return {"position": obj_position, "orientation": obj_orientation}
 
     def predict_ycb(self, obj_position, obj_orientation, obj_scale):
         if self.grasp_type == "active":
@@ -613,9 +622,9 @@ class CWPPredictor(object):
                 torch.stack([-obj_scale[:, 0], torch.zeros_like(height), height], dim=1)           # rh_thdistal
             ], dim=1)  # shape: [N, 4, 3]
             if self.hand_laterality == "right":
-                offset = torch.Tensor([0.0, 0.01, 0.0]).to(self.device)
+                offset = torch.Tensor([0.0, -0.05, 0.0]).to(self.device)
             else:
-                offset = torch.Tensor([0.0, 0.06, 0.0]).to(self.device)
+                offset = torch.Tensor([0.0, 0.08, 0.0]).to(self.device)
         elif self.grasp_type == "passive":
             raise NotImplementedError("Passive grasp type is not supported for YCB objects")
         obj_position = obj_position[:, None] + finger_offset + offset[None, None]

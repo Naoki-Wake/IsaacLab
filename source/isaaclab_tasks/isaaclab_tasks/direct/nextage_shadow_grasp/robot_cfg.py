@@ -11,15 +11,22 @@ from isaaclab_tasks.utils.hand_utils import ShadowHandUtils, HondaHandUtils
 DEG_TO_RAD = math.pi / 180
 
 class RobotCfg():
-    def __init__(self, grasp_type: str = "active", mode: str = None):
+    def __init__(self, grasp_type: str = "active", mode: str = None, robot_name: str = "nextage-shadow"):
         self.grasp_type = grasp_type
         self.action_space = 6 + self.n_finger_joint + 1 # [x, y, z, roll, pitch, yaw] + [n_finger_joint joints] + [terminate]
+        _fa = 15.0 * DEG_TO_RAD
         finger_action_scale = [
-            20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 0.3,
-            0, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 0.3,
-            20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 0.3,
-            20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD
+            _fa, _fa, _fa, 0.3,
+            0, _fa, _fa, 0.3,
+            _fa, _fa, _fa, 0.3,
+            _fa, _fa, _fa, _fa
         ]
+        # finger_action_scale = [
+        #     20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 0.3,
+        #     0, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 0.3,
+        #     20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 0.3,
+        #     20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD
+        # ]
         if self.grasp_type == "active":
             self.action_scale = [0.01, 0.01, 0.01] + [0.0, 10.0 * DEG_TO_RAD, 0.0] + finger_action_scale + [1.0]
         elif self.grasp_type == "passive":
@@ -32,6 +39,10 @@ class RobotCfg():
             track_air_time=True,
             # debug_vis=True
         )
+        self.robot_name = robot_name
+        # if "multi" in self.robot_name:
+        #     # inference only
+        #     self.action_space *= 2
 
     def get_articulation_cfg(self) -> ArticulationCfg:
         return ArticulationCfg(
@@ -127,7 +138,7 @@ class NextageShadowRobotCfg(RobotCfg):
         self.off_camera_sensor = False
         self.off_contact_sensor = False
         self.first_person_camera = True
-        super().__init__(grasp_type=grasp_type, mode=mode)
+        super().__init__(grasp_type=grasp_type, mode=mode, robot_name="nextage-shadow")
 
 class ShadowRobotCfg(RobotCfg):
     def __init__(self, grasp_type: str = "active", mode: str = None):
@@ -174,7 +185,7 @@ class ShadowRobotCfg(RobotCfg):
         )
         self.first_person_camera = False
         self.camera_pos = (-0.65, 0.3, 1.5)
-        super().__init__(grasp_type=grasp_type, mode=mode)
+        super().__init__(grasp_type=grasp_type, mode=mode, robot_name="shadow")
 
 class ShadowRobotMultiCfg(RobotCfg):
     def __init__(self, grasp_type: str = "active", mode: str = None):
@@ -238,7 +249,7 @@ class ShadowRobotMultiCfg(RobotCfg):
         )
         self.first_person_camera = False
         self.camera_pos = (-0.65, 0.3, 1.5)
-        super().__init__(grasp_type=grasp_type, mode=mode)
+        super().__init__(grasp_type=grasp_type, mode=mode, robot_name="shadow-multi")
 
 class HondaRobotCfg(RobotCfg):
     def __init__(self, grasp_type: str = "active", mode: str = None):

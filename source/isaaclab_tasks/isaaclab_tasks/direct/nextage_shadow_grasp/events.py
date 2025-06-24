@@ -31,6 +31,13 @@ def create_grasp_event_cfg(base_obj_size, object_type, grasp_type, mode):
             "y": (0.5 * base_obj_size[1], 1.25 * base_obj_size[1]),
             "z": (0.5 * base_obj_size[2], 1.25 * base_obj_size[2])
         }
+        if mode == "demo":
+            # For demo mode, we use a smaller scale range to ensure the object is not too large.
+            scale_range = {
+                "x": (1.0 * base_obj_size[0], 1.0 * base_obj_size[0]),
+                "y": (2.0 * base_obj_size[1], 2.0 * base_obj_size[1]),
+                "z": (0.5 * base_obj_size[2], 1.0 * base_obj_size[2])
+            }
 
     randomize_scale = EventTerm(
         func=mdp.randomize_rigid_body_scale,

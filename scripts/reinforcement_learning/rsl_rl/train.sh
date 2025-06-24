@@ -9,7 +9,7 @@ ROBOT_NAME=shadow
 
 LOG_PROJECT_NAME="${USER}_isaaclab"
 EXPERIMENT_NAME="${ROBOT_NAME}-${GRASP_TYPE}-${OBJ_TYPE}"
-RUN_NAME="$(hostname)-n${NUM_ENVS}"
+RUN_NAME="$(hostname)-${EXPERIMENT_NAME}-n${NUM_ENVS}"
 
 if [ "${DEBUG}" == "t" ]; then
     NUM_ENVS=5

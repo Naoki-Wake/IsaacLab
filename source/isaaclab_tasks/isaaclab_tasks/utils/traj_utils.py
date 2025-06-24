@@ -56,6 +56,7 @@ class ReferenceTrajInfo:
         self.objectScale        = torch.ones((num_envs, 3), device=device)  # scale of the object
 
         self.cwp               = torch.zeros((num_envs, len(self.hand_module.position_tip_links), 3), device=device)  # current workspace position
+        self.contact_center_world = torch.zeros((num_envs, 3), device=device)  # contact center world position
 
         self.hand_preshape_joint = torch.zeros((num_envs, self.n_hand_joints), device=device)
         self.hand_shape_joint    = torch.zeros((num_envs, self.n_hand_joints), device=device)
@@ -68,7 +69,7 @@ class ReferenceTrajInfo:
         # default poses ----------------------------------------------------
         self.default_open_pose = torch.Tensor(self.hand_module.preshape_joint).to(device)
 
-        if mode == "train":
+        if mode in ["train", "eval"]:
             subtasks = [
                 # {"name": "init",     "start": 0.00, "end": 0.05},
                 {"name": "approach", "start": 0.00, "end": 0.40},
@@ -80,13 +81,15 @@ class ReferenceTrajInfo:
                 # {"name": "release",  "start": 0.80, "end": 1.00,
                 #  "param": {"open_pose": open_pose.tolist()}},
             ]
-        elif mode in ["test"]:# , "collect"]:
-            subtasks = [
-                {"name": "approach", "start": 0.00, "end": 0.25},
-                {"name": "grasp",    "start": 0.25, "end": 0.40},
-                {"name": "bring",     "start": 0.40, "end": 1.00,
-                 "param": {"delta": [0.0, 0.0, pick_height]}},
-            ]
+        # elif mode in ["test", "collect"]:
+        #     subtasks = [
+        #         {"name": "approach", "start": 0.00, "end": 0.20},
+        #         {"name": "grasp",    "start": 0.20, "end": 0.40},
+        #         {"name": "bring",     "start": 0.40, "end": 0.45,
+        #          "param": {"delta": [0.0, 0.0, pick_height]}},
+        #         {"name": "bring",     "start": 0.9, "end": 1.00,
+        #          "param": {"delta": [0.0, 0.0, 0.0]}},
+        #     ]
         elif mode == "demo":
             if self.hand_module.hand_laterality == "left":
                 subtasks = [
@@ -94,16 +97,16 @@ class ReferenceTrajInfo:
                     {"name": "approach", "start": 0.00, "end": 0.1},
                     {"name": "grasp",    "start": 0.1, "end": 0.2},
                     {"name": "bring",     "start": 0.2, "end": 0.4,  "param": {"delta": [0.0, -0.0, 0.1]}},
-                    {"name": "bring",     "start": 0.4, "end": 0.6,  "param": {"delta": [0.0, 0.0, 0.0]}},
-                    {"name": "release",  "start": 0.6, "end": 0.7},
-                    {"name": "bring",     "start": 0.7, "end": 1.0,  "param": {"delta": [0.0, 0.2, 0.0]}},
+                    {"name": "bring",     "start": 0.4, "end": 0.7,  "param": {"delta": [0.0, 0.0, 0.0]}},
+                    {"name": "release",  "start": 0.7, "end": 0.8},
+                    {"name": "bring",     "start": 0.8, "end": 1.0,  "param": {"delta": [0.0, 0.2, 0.0]}},
                 ]
             else:
                 subtasks = [
-                    {"name": "init",     "start": 0.00, "end": 0.05, "param": {"init_pose": ([0.0, 0.0, 0.9], [1.0, 0.0, 0.0, 0.0])}},
+                    # {"name": "init",     "start": 0.00, "end": 0.05, "param": {"init_pose": ([0.0, 0.0, 0.9], [1.0, 0.0, 0.0, 0.0])}},
                     {"name": "approach", "start": 0.4, "end": 0.5},
                     {"name": "grasp",    "start": 0.5, "end": 0.6},
-                    {"name": "bring",     "start": 0.6, "end": 1.0,  "param": {"delta": [0.0, -0.0, 0.1]}},
+                    {"name": "bring",     "start": 0.6, "end": 1.0,  "param": {"delta": [0.0, 0.0, 0.0]}},
                 ]
 
         for st in subtasks:
@@ -290,7 +293,7 @@ class ReferenceTrajInfo:
 
     def update(
         self, env_ids: torch.Tensor, handP_world: torch.Tensor, handQ_world: torch.Tensor, handP_world_pre: torch.Tensor,
-        handQ_world_pre: torch.Tensor, hand_shape_joint: torch.Tensor, hand_preshape_joint: torch.Tensor
+        handQ_world_pre: torch.Tensor, hand_shape_joint: torch.Tensor, hand_preshape_joint: torch.Tensor, contact_center: torch.Tensor
     ):
         """Update the current hand pose and joint state."""
         self.handP_world[env_ids] = handP_world
@@ -299,6 +302,7 @@ class ReferenceTrajInfo:
         self.handQ_world_pre[env_ids] = handQ_world_pre
         self.hand_shape_joint[env_ids] = hand_shape_joint
         self.hand_preshape_joint[env_ids] = hand_preshape_joint
+        self.contact_center_world[env_ids] = contact_center
 
 class ReferenceTrajInfoMulti():
     def __init__(self, keys, num_envs, device, hand_module, cwp_predictor, mode: str, pick_height:float=0.05):

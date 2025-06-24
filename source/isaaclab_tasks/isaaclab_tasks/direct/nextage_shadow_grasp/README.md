@@ -12,5 +12,5 @@ HYDRA_FULL_ERROR=1  DOCKER_ISAACLAB_PATH=. ./isaaclab.sh -p scripts/reinforcemen
 ```
 then
 ```
-cd scripts/my_models/shadow/ && usdcat --flatten floating_shadow.usd -o floating_shadow.usd
+cd scripts/my_models/shadow/; usdcat --flatten floating_shadow.usd -o floating_shadow.usd; cd -
 ```
