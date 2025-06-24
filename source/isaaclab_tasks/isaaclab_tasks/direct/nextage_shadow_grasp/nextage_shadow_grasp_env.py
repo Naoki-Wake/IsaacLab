@@ -146,7 +146,7 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     height_bonus_threshold = 0.05   # Height threshold for bonus
     obj_rot_penalty_scale = 1.0     # Penalty for object rotation deviation
     obj_rot_threshold = math.radians(15)  # Threshold for object rotation deviation
-    obj_rot_threshold = math.radians(180)  # Threshold for object rotation deviation
+    # obj_rot_threshold = math.radians(180)  # Threshold for object rotation deviation
     rel_obj_vel_threshold = 0.1  # Threshold for relative object velocity
 
 
@@ -924,10 +924,10 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         rel_vel = torch.norm(self.hand2obj[key]["lin_vel"], dim=-1)
         # grasp is success if the object is not moving with respect to the hand in the process of picking
-        # is_grasped = torch.logical_and(
-        #     obj_rot < self.cfg.obj_rot_threshold,
-        #     torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg)
-        # )
+        is_grasped = torch.logical_and(
+            obj_rot < self.cfg.obj_rot_threshold,
+            torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg)
+        )
         is_grasped = torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg[key])
         is_grasped_full = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold * 0.8)
         is_grasped_half = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold / 2 * 0.8)
