@@ -16,9 +16,9 @@ class RobotCfg():
         self.action_space = 6 + self.n_finger_joint + 1 # [x, y, z, roll, pitch, yaw] + [n_finger_joint joints] + [terminate]
         _fa = 20.0 * DEG_TO_RAD
         finger_action_scale = [
-            _fa, _fa, _fa, 0.5,
-            0, _fa, _fa, 0.5,
-            _fa, _fa, _fa, 0.5,
+            _fa, _fa, _fa, 0.3,
+            0, _fa, _fa, 0.3,
+            _fa, _fa, _fa, 0.3,
             _fa, _fa, _fa, _fa
         ]
         # finger_action_scale = [
