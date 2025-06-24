@@ -926,7 +926,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         # grasp is success if the object is not moving with respect to the hand in the process of picking
         is_grasped = torch.logical_and(
             obj_rot < self.cfg.obj_rot_threshold,
-            torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg)
+            torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg[key])
         )
         is_grasped = torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg[key])
         is_grasped_full = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold * 0.8)
