@@ -1,5 +1,7 @@
 import math
 import os
+from typing import Dict, List, Union
+
 from isaaclab.assets import Articulation, ArticulationCfg
 from isaaclab.actuators.actuator_cfg import ImplicitActuatorCfg
 from isaaclab.sensors import ContactSensor, ContactSensorCfg
@@ -27,10 +29,20 @@ class RobotCfg():
         #     20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 0.3,
         #     20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD, 20.0 * DEG_TO_RAD
         # ]
-        if self.grasp_type == "active":
-            self.action_scale = [0.01, 0.01, 0.01] + [0.0, 10.0 * DEG_TO_RAD, 0.0] + finger_action_scale + [1.0]
-        elif self.grasp_type == "passive":
-            self.action_scale = [0.01, 0.01, 0.0] + [0.0, 0.0, 10.0 * DEG_TO_RAD] + finger_action_scale + [1.0]
+
+        def _get_action_scale(grasp_type: str):
+            if grasp_type == "active":
+                action_scale = [0.01, 0.01, 0.01] + [0.0, 10.0 * DEG_TO_RAD, 0.0] + finger_action_scale + [1.0]
+            elif grasp_type == "passive":
+                action_scale = [0.01, 0.01, 0.0] + [0.0, 0.0, 10.0 * DEG_TO_RAD] + finger_action_scale + [1.0]
+            return action_scale
+
+        if isinstance(grasp_type, str):
+            self.action_scale = _get_action_scale(grasp_type)
+        elif isinstance(grasp_type, list):
+            self.action_scale = [_get_action_scale(g) for g in grasp_type]
+        else:
+            raise ValueError("grasp_type must be a string or a list of strings.")
 
         self.contact_sensor: ContactSensorCfg = ContactSensorCfg(
             prim_path="/World/envs/env_.*/Robot/.*",
@@ -223,9 +235,19 @@ class ShadowRobotMultiCfg(RobotCfg):
         }
         self.n_finger_joint = 16
         urdf_path = os.path.abspath(self.usd_path.replace(".usd", ".urdf"))
+
+        if isinstance(grasp_type, str):
+            grasp_type = [grasp_type, grasp_type]  # Use the same grasp type for both hands
+        elif isinstance(grasp_type, list):
+            pass
+        elif isinstance(grasp_type, dict):
+            grasp_type = [grasp_type.get("right", "active"), grasp_type.get("left", "active")]
+        else:
+            raise ValueError("grasp_type must be a string or a list of two strings for multi-hand configuration.")
+
         self.hand_util = {
-            "right": ShadowHandUtils(grasp_type=grasp_type, hand_laterality="right", urdf_path=urdf_path),
-            "left": ShadowHandUtils(grasp_type=grasp_type, hand_laterality="left", urdf_path=urdf_path)
+            "right": ShadowHandUtils(grasp_type=grasp_type[0], hand_laterality="right", urdf_path=urdf_path),
+            "left": ShadowHandUtils(grasp_type=grasp_type[1], hand_laterality="left", urdf_path=urdf_path)
         }
         self.off_camera_sensor = True
         self.off_contact_sensor = False

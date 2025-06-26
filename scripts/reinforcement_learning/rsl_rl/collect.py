@@ -89,6 +89,7 @@ def main():
         env_cfg.off_camera_sensor = False
     env_cfg.robot_name = "shadow"
     env_cfg.object_type = "superquadric"  # or "superquadric"
+    env_cfg.grasp_type = "passive"
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # specify directory for logging experiments

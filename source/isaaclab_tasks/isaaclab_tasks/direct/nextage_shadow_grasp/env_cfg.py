@@ -109,7 +109,7 @@ class SQObjCfg(ObjCfg):
                     max_linear_velocity=100,
                     max_angular_velocity=100
                 ),
-                mass_props=sim_utils.MassPropertiesCfg(mass=0.01 if self.mode == "demo" else 0.1),
+                mass_props=sim_utils.MassPropertiesCfg(mass=0.001 if self.mode == "demo" else 0.1),
                 collision_props=sim_utils.CollisionPropertiesCfg(
                     collision_enabled=True
                 ),

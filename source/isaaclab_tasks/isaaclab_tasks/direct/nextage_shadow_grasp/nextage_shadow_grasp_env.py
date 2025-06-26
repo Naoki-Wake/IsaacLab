@@ -145,7 +145,7 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
     force_penalty_scale = 1.0      # Penalty for excessive force
     height_bonus_threshold = 0.05   # Height threshold for bonus
     obj_rot_penalty_scale = 1.0     # Penalty for object rotation deviation
-    obj_rot_threshold = math.radians(15)  # Threshold for object rotation deviation
+    obj_rot_threshold = math.radians(30)  # Threshold for object rotation deviation
     # obj_rot_threshold = math.radians(180)  # Threshold for object rotation deviation
     rel_obj_vel_threshold = 0.1  # Threshold for relative object velocity
 
@@ -267,7 +267,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         self.cwp_predictor: dict[str, CWPPredictor] = {
             key: CWPPredictor(
-            grasp_type=cfg.grasp_type,
+            grasp_type=cfg.grasp_type[key] if isinstance(cfg.grasp_type, dict) else cfg.grasp_type,
             robot_name=cfg.robot_name,
             hand_laterality=key,
             obj_type=cfg.object_type,
@@ -526,18 +526,22 @@ class NextageShadowGraspEnv(DirectRLEnv):
         timestep_ratio = (self.episode_length_buf / (self.max_episode_length - 1))[env_slice]
 
         for hand_idx, hand_key in enumerate(self.reference_traj_keys):
-            # Update the current end-effector pose
-            if len(self.reference_traj_keys) == 1:
+            # Determine action and scale
+            if  self.actions.ndim <= 2 or len(self.reference_traj_keys) == 1:
                 actions = self.actions
+                action_scale = self.action_scale
             else:
-                # n_dims_per_actions = self.robot_cfg.action_space
-                # start_idx, end_idx = n_dims_per_actions * hand_idx, n_dims_per_actions * (hand_idx + 1)
-                if self.actions.ndim <= 2:
-                    actions = self.actions
-                else:
-                    actions = self.actions[hand_idx]
+                actions = self.actions[hand_idx]
+                action_scale = self.action_scale[hand_idx]
 
+            # Scale all actions first
+            action_scaled = actions * action_scale[None, :]
+
+            # Get current end-effector pose
             cur_eef_pos, cur_eef_rot = self._get_current_eef_pose(hand_key)
+            arm_idx_len = len(self.arm_indices[hand_key])
+
+            # Compute IK targets
             self.ik_target_pos[hand_key], self.ik_target_rot[hand_key], self.finger_targets[hand_key] = self.reference_traj_info.get(
                 hand_key,
                 env_slice, timestep_ratio,
@@ -547,13 +551,13 @@ class NextageShadowGraspEnv(DirectRLEnv):
                 objectP_world=self.obj_pos[env_slice],
                 objectQ_world=self.obj_rot[env_slice],
                 objectScale=self._obj_scales[env_slice],
-                action_handP=actions[env_slice, :3] * self.action_scale[None, :3],
+                action_handP=action_scaled[env_slice, :3],
                 action_handQ=quat_from_euler_xyz(
-                    roll=actions[env_slice, 3] * self.action_scale[None, 3],
-                    pitch=actions[env_slice, 4] * self.action_scale[None, 4],
-                    yaw=actions[env_slice, 5] * self.action_scale[None, 5]
+                    roll=action_scaled[env_slice, 3],
+                    pitch=action_scaled[env_slice, 4],
+                    yaw=action_scaled[env_slice, 5],
                 ),
-                action_hand_joint=actions[env_slice, len(self.arm_indices[hand_key]):-1] * self.action_scale[None, len(self.arm_indices[hand_key]):-1],
+                action_hand_joint=action_scaled[env_slice, arm_idx_len:-1],
             )
             arm_targets, self.ik_fail = self._solve_ik(env_slice, self.ik_target_pos[hand_key], self.ik_target_rot[hand_key], hand_key)
 
@@ -668,14 +672,12 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
     def _get_observations(self):
         obs = []
-        reset_flg = False
         for hand_idx, hand_key in enumerate(self.reference_traj_keys):
             if len(self.reference_traj_keys) > 1:
                 if self.actions.ndim <= 2:
                     # hack when using RslRLVecEnvWrapper with multiple hands
                     # This estimated dimension of actions by calling get_observation with zero actions
                     prev_actions = self.actions
-                    reset_flg = True # called only once
                 else:
                     # Ordinary case with multiple hands
                     # Extract actions for the specific hand
@@ -688,11 +690,10 @@ class NextageShadowGraspEnv(DirectRLEnv):
             _obs = self._get_observations_hand(hand_key=hand_key, prev_actions=prev_actions)
             obs.append(_obs)
 
-        obs = torch.stack(obs, dim=0)
-        if obs.shape[0] == 1 or reset_flg:
+        if len(obs) == 1:
             # when using single hand
             obs = obs[0]
-        return {"policy": torch.clamp(obs, -5.0, 5.0)}
+        return {"policy": obs}
 
     def _get_observations_hand(self, hand_key, prev_actions) -> dict:
         self._compute_intermediate_values()
@@ -707,9 +708,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
             - 1.0
         )
         finger_effort = self.robot_dof_targets[:, self.hand_full_indices[hand_key]] - self._robot.data.joint_pos[:, self.hand_full_indices[hand_key]]
-        def _to_local(pos):
-            # Convert world position to local position in the hand frame
-            return pos - self.scene.env_origins
 
         obs = torch.cat(
             (
@@ -737,7 +735,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
                 self.extras[f"dp_ref_{key}"] = self._get_dp_ref(hand_pos, hand_rot, key)
                 self._prev_hand_pos[key], self._prev_hand_rot[key] = hand_pos, hand_rot
 
-        return obs
+        return torch.clamp(obs, -5.0, 5.0)
 
     def _get_dp_ref(self, hand_pos, hand_rot, key):
         # Compute the reference for the Diffusion Policy
@@ -921,7 +919,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
             is_contact = torch.zeros((self.num_envs, 1), device=self.device, dtype=torch.bool)
             force_penalty = torch.zeros((self.num_envs,), device=self.device)
 
-        contacts_reward = torch.sum(is_contact, dim=1) * self.cfg.contact_reward_scale
+        contacts_reward = torch.sum(is_contact, dim=-1) * self.cfg.contact_reward_scale
 
         rel_vel = torch.norm(self.hand2obj[key]["lin_vel"], dim=-1)
         # grasp is success if the object is not moving with respect to the hand in the process of picking
@@ -929,7 +927,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
             obj_rot < self.cfg.obj_rot_threshold,
             torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg[key])
         )
-        is_grasped = torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg[key])
+        # is_grasped = torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg[key])
+        is_grasped = torch.logical_and(is_grasped, is_contact.all(dim=-1))
         is_picked_full = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold * 0.8)
         is_picked_half = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold / 2 * 0.8)
 
@@ -1046,10 +1045,11 @@ class NextageShadowGraspEnv(DirectRLEnv):
         all_marker_indices = []
 
         for hand_key in self.reference_traj_keys:
+            _env_ids = self.reference_traj_info.approach_flg[hand_key][env_ids]
             for cnt, k in enumerate(self.hand_util[hand_key].position_tip_links):
-                pos = self.ref_finger_pos[hand_key][env_ids, cnt]  # (N, 3)
-                ori = torch.tensor([[1, 0, 0, 0]], device=self.device).repeat(len(env_ids), 1)  # (N, 4)
-                idx = torch.zeros(len(env_ids), dtype=torch.int64, device=self.device)  # (N,)
+                pos = self.ref_finger_pos[hand_key][_env_ids, cnt]  # (N, 3)
+                ori = torch.tensor([[1, 0, 0, 0]], device=self.device).repeat(len(_env_ids), 1)  # (N, 4)
+                idx = torch.zeros(len(_env_ids), dtype=torch.int64, device=self.device)  # (N,)
 
                 all_positions.append(pos)
                 all_orientations.append(ori)

@@ -35,6 +35,7 @@ parser.add_argument(
     help="Use the pre-trained checkpoint from Nucleus.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument("--checkpoint-paths", type=str, nargs="+", required=True, help="Paths to the checkpoints to load.")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -55,7 +56,8 @@ import os
 import time
 import torch
 
-from rsl_rl.runners import OnPolicyRunner
+# from rsl_rl.runners import OnPolicyRunner
+from scripts.reinforcement_learning.rsl_rl.on_policy_runner_multi_policy import OnPolicyRunnerMultiPolicy as OnPolicyRunner
 
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.assets import retrieve_file_path
@@ -77,6 +79,7 @@ def main():
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
     env_cfg.mode = "demo"
+    env_cfg.grasp_type = {"right": "passive", "left": "active"}
     # env_cfg.off_camera_sensor = False
     env_cfg.robot_name = "shadow-multi"
     env_cfg.object_type = "ycb"
@@ -87,17 +90,22 @@ def main():
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
     log_root_path = os.path.abspath(log_root_path)
     print(f"[INFO] Loading experiment from directory: {log_root_path}")
-    if args_cli.use_pretrained_checkpoint:
-        resume_path = get_published_pretrained_checkpoint("rsl_rl", args_cli.task)
-        if not resume_path:
-            print("[INFO] Unfortunately a pre-trained checkpoint is currently unavailable for this task.")
-            return
-    elif args_cli.checkpoint:
-        resume_path = retrieve_file_path(args_cli.checkpoint)
+    # if args_cli.use_pretrained_checkpoint:
+    #     resume_path = get_published_pretrained_checkpoint("rsl_rl", args_cli.task)
+    #     if not resume_path:
+    #         print("[INFO] Unfortunately a pre-trained checkpoint is currently unavailable for this task.")
+    #         return
+    if args_cli.checkpoint:
+        raise NotImplementedError("Checkpoint argument is not supported in this script.")
+    elif args_cli.checkpoint_paths:
+        resume_path = [retrieve_file_path(args_cli.checkpoint_paths[i]) for i in range(len(args_cli.checkpoint_paths))]
     else:
-        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+        raise NotImplementedError(
+            "Either --checkpoint or --checkpoint_paths argument must be provided to load the model checkpoint."
+        )
+        # resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
-    log_dir = os.path.dirname(resume_path)
+    # log_dir = os.path.dirname(resume_path)
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
@@ -120,26 +128,22 @@ def main():
 
     # extract the neural network module
     # we do this in a try-except to maintain backwards compatibility.
-    try:
-        # version 2.3 onwards
-        policy_nn = ppo_runner.alg.policy
-    except AttributeError:
-        # version 2.2 and below
-        policy_nn = ppo_runner.alg.actor_critic
+
+    # version 2.3 onwards
+    # policy_nn = [ppo_runner.alg[i].policy for i in range(ppo_runner.n_policy)]
 
     # export policy to onnx/jit
-    export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(policy_nn, ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.pt")
-    export_policy_as_onnx(
-        policy_nn, normalizer=ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.onnx"
-    )
+    # export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+    # export_policy_as_jit(policy_nn, ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.pt")
+    # export_policy_as_onnx(
+    #     policy_nn, normalizer=ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.onnx"
+    # )
     base_env = env.unwrapped
     dt = base_env.step_dt
 
     # reset environment
     obs, extras = env.get_observations()
-    if len(base_env.reference_traj_keys) > 1:
-        obs = torch.stack([obs for _ in range(len(base_env.reference_traj_keys))], dim=0)
+
     timestep = 0
     # simulate environment
     time.sleep(2.0)
@@ -148,9 +152,11 @@ def main():
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():
-            actions = [
-                policy(obs[hand_idx]) for hand_idx, hand_key in enumerate(base_env.reference_traj_keys)
-            ]
+            actions = []
+            for i in range(len(policy)):
+                action = policy[i](obs[i])
+                actions.append(action)
+            # should be converted to tensor
             actions = torch.stack(actions, dim=0)
             # env stepping
             obs, rewards, dones, extras = env.step(actions)
@@ -159,12 +165,6 @@ def main():
         sleep_time = dt - (time.time() - start_time)
         if args_cli.real_time and sleep_time > 0:
             time.sleep(sleep_time)
-
-        # if (timestep + 1) % 80 == 0:
-        #     base_env.episode_length_buf[:] = 0
-        #     hand_key = "right" if base_env.activated_hand == "left" else "left"
-        #     base_env.reset_trajectory(hand_key=hand_key)
-        #     if hand_key == "right": break
 
         timestep += 1
     # close the simulator

@@ -72,7 +72,7 @@ class ReferenceTrajInfo:
         # default poses ----------------------------------------------------
         self.default_open_pose = torch.Tensor(self.hand_module.preshape_joint).to(device)
 
-        if mode in ["train", "eval"]:
+        if mode in ["train", "eval", "collect"]:
             subtasks = [
                 # {"name": "init",     "start": 0.00, "end": 0.05},
                 {"name": "approach", "start": 0.00, "end": 0.40},
@@ -106,7 +106,7 @@ class ReferenceTrajInfo:
                 ]
             else:
                 subtasks = [
-                    {"name": "init",     "start": 0.00, "end": 0.05, "param": {"init_pose": ([0.0, -0.5, 1.5], [0.1228, 0.6964, 0.6964, 0.1228])}},
+                    {"name": "init",     "start": 0.00, "end": 0.4, "param": {"init_pose": ([0.0, -0.5, 1.5], [0.1228, 0.6964, 0.6964, 0.1228])}},
                     {"name": "approach", "start": 0.4, "end": 0.5},
                     {"name": "grasp",    "start": 0.5, "end": 0.6},
                     {"name": "bring",     "start": 0.6, "end": 1.0,  "param": {"delta": [0.0, 0.0, 0.0]}},
@@ -251,10 +251,12 @@ class ReferenceTrajInfo:
             self.handP_world_pre[idx_chg]     = current_handP_world[changed]
             self.handQ_world_pre[idx_chg]     = current_handQ_world[changed]
             self.hand_preshape_joint[idx_chg] = self.finger_decoupling_rule(current_hand_joint[changed])
-            # self.hand_shape_joint[idx_chg]    = current_hand_joint[changed]
 
             self.pick_flg[idx_chg]            = False
             self.approach_flg[idx_chg]        = False
+            # self.cwp[idx_chg] = torch.zeros(
+            #     (len(idx_chg), len(self.hand_module.position_tip_links), 3), device=self.device
+            # )
             self.phase_idx[idx_chg]           = new_phase[changed]
 
         if objectP_world is not None and objectQ_world is not None and objectScale is not None:
