@@ -15,7 +15,9 @@ except ImportError:
 from openai import OpenAI, AzureOpenAI
 import openai
 import re
+import logging
 
+logging.getLogger().setLevel(logging.ERROR)
 # compare two videos using GPT-4 Vision
 def load_credentials(env_file: str) -> dict:
     """
@@ -120,12 +122,12 @@ def build_prompt_content(
     if len(additional_string) > 0:
         content.append({"type": "text", "text": additional_string})
     footer = (
-        "Evaluate the progress in four stages: "
-        "(0) the hand is not near the object; "
-        "(1) the hand approaches the object; "
-        "(2) the hand touches the object; "
-        "(3) the hand grasps or holds the object; "
-        "(4) the hand lifts the object.\n"
+        "Evaluate the progress in five stages:"
+        "(0) The hand is still far from the object and must move closer to interact with it;"
+        "(1) The hand is within a few centimeters of the object;"
+        "(2) The hand is touching the object;"
+        "(3) The hand is securely grasping or holding the object;"
+        "(4) The hand is lifting the object."
         "Answer with a single number and return a JSON object in the format: {\"answer\": \"0\"}, {\"answer\": \"1\"}, {\"answer\": \"2\"}, {\"answer\": \"3\"}, or {\"answer\": \"4\"}."
     )
     content.append({"type": "text", "text": footer})
@@ -173,12 +175,21 @@ def ask_gpt(
     result = query_vlm(client, client_params, prompt_content)
     # print(result)
     answer = result.get("answer", "").lower()
+    print(f"GPT-4 Vision response: {answer}")
     # check if the answer is a valid stage
     if answer not in {"0", "1", "2", "3", "4"}:
         print(f"Invalid answer: {answer}. Expected '0', '1', '2', '3', or '4'.")
         return 0.0
     # return success ratio
     answer = float(answer)/4.0
+    # overwrite the answer on the last frame of the image and save it
+    # if frames_candidate:
+    #     last_frame = frames_candidate[-1]
+    #     cv2.putText(last_frame, f"Progress: {answer:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    #     str_answer = str(answer).replace('.', '_')
+    #     file_name = f"progress_result-{str_answer}-{int(time.time())}.jpg"
+    #     cv2.imwrite(file_name, last_frame)
+    #     # print(f"Saved progress result image as '{file_name_random}'.")
     return answer
 
 

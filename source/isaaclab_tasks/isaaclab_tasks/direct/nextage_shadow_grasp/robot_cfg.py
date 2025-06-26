@@ -169,7 +169,7 @@ class ShadowRobotWakeCfg(RobotCfg):
         self.camera_data_types = ["rgb"] # , "normals"]
         self.compute_pointcloud = False
         self.disable_analytic_reward = True
-        self.signal_sensorinfo_to_gpt = True
+        self.signal_sensorinfo_to_gpt = False
         if "depth" not in self.camera_data_types:
             self.compute_pointcloud = False
         # self.camera = CameraCfg(

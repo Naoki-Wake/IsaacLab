@@ -114,6 +114,7 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
                 indices = np.linspace(0, total - 1, num_frames_to_sample, endpoint=True, dtype=int)
                 indices = np.unique(indices)  # avoid duplicates in short videos
             sampled_frames = [cv2.cvtColor(self.gpt_frames[env_id][i].cpu().numpy(), cv2.COLOR_BGR2RGB) for i in indices]
+            print(f"Computing GPT reward for env {env_id}")
             progress = ask_gpt(
                 self.client, self.client_params,
                 sampled_frames,
@@ -210,19 +211,21 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
             rewards = rewards * 0
 
         # compute GPT rewards
-        if not self.robot_cfg.off_camera_sensor:
-            for env_id in self.envs_done:
-                # if env_id == 0:  # only write video for the first environment
-                is_truncated = env_id in self.envs_truncated
-                print(f"Computing GPT reward for env {env_id}")
-                if self.robot_cfg.signal_sensorinfo_to_gpt:
-                    sensor_data = {"is_contact": {
-                                    "description": "Whether the object is in contact with each finger tip.",
-                                    "data": is_contact[env_id].cpu().numpy().tolist()}}
-                    self._write_video(env_id, is_truncated, additional_string=str(sensor_data))
-                else:
-                    self._write_video(env_id, is_truncated)
-                #print(f"debug: done writing video. num of frames for env {env_id} is {len(self.gpt_frames[env_id])}")
+        #if not self.robot_cfg.off_camera_sensor:
+        #    for env_id in self.envs_done:
+        #        # if env_id == 0:  # only write video for the first environment
+        #        is_truncated = env_id in self.envs_truncated
+        #        
+        #        import pdb; pdb.set_trace()
+        #        if self.robot_cfg.signal_sensorinfo_to_gpt:
+        #            sensor_data = {"is_contact": {
+        #                            "description": "Whether the object is in contact with each finger tip.",
+        #                            "data": is_contact[env_id].cpu().numpy().tolist()}}
+        #            self._write_video(env_id, is_truncated, additional_string=str(sensor_data))
+        #            import pdb; pdb.set_trace()
+        #        else:
+        #            self._write_video(env_id, is_truncated)
+        #        #print(f"debug: done writing video. num of frames for env {env_id} is {len(self.gpt_frames[env_id])}")
 
         progress_coefficient = 1.0
         # add progress_coefficient*gpt_progress if nonzero
@@ -291,12 +294,12 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
     def _get_observations(self):
         obs = super()._get_observations()
         # print(f"debug1: episode_length_buf: {self.episode_length_buf[0]}, num of self.gpt_frames: {len(self.gpt_frames[0])}")
-        if not self.robot_cfg.off_camera_sensor:
-            # Grab the raw RGB tensor (N, H, W, 4) on CUDA, slice off alpha
-            rgb_gpu = self._camera.data.output["rgb"][..., :3]
-            rgb_gpu = rgb_gpu.to(torch.uint8)
-            for env_id in range(self.num_envs):
-                #if env_id == 0:
-                self.gpt_frames[env_id].append(rgb_gpu[env_id].clone())
+        # if not self.robot_cfg.off_camera_sensor:
+        #     # Grab the raw RGB tensor (N, H, W, 4) on CUDA, slice off alpha
+        #     rgb_gpu = self._camera.data.output["rgb"][..., :3]
+        #     rgb_gpu = rgb_gpu.to(torch.uint8)
+        #     for env_id in range(self.num_envs):
+        #         #if env_id == 0:
+        #         self.gpt_frames[env_id].append(rgb_gpu[env_id].clone())
         # print(f"debug3: num of self.gpt_frames: {len(self.gpt_frames[0])}")
         return obs

@@ -37,7 +37,7 @@ params:
       scale_value: 1.0
 
     max_epochs: 10000
-    num_steps_per_episode: 23
+    num_steps_per_episode: 5 #23
     save_best_after: 500
     save_frequency: 500
     gamma: 0.99
@@ -49,5 +49,5 @@ params:
     batch_size: 2048
     learnable_temperature: True
     num_warmup_steps: 10 # total number of warmup steps: num_actors * num_steps_per_episode * num_warmup_steps
-    replay_buffer_size: 5000
+    replay_buffer_size: 10000
     num_actors: 64
