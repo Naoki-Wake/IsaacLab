@@ -928,7 +928,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
             torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg[key])
         )
         # is_grasped = torch.logical_and(rel_vel < self.cfg.rel_obj_vel_threshold, self.reference_traj_info.pick_flg[key])
-        is_grasped = torch.logical_and(is_grasped, is_contact.all(dim=-1))
+        # is_grasped = torch.logical_and(is_grasped, is_contact.all(dim=-1))
         is_picked_full = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold * 0.8)
         is_picked_half = torch.logical_and(is_grasped, obj_z_pos > self.cfg.height_bonus_threshold / 2 * 0.8)
 
@@ -936,7 +936,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         grasp_success_bonus = torch.where(
             is_grasped,
-            torch.ones_like(is_grasped) * torch.clamp(obj_z_pos / self.cfg.height_bonus_threshold, max=1) * self.cfg.grasp_reward_scale,
+            torch.ones_like(is_grasped) * torch.clamp(obj_z_pos / self.cfg.height_bonus_threshold, max=1) * torch.mean(is_contact, dim=-1) * self.cfg.grasp_reward_scale,
             torch.zeros_like(is_grasped)
         )
 
