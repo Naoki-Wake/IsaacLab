@@ -936,13 +936,12 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         grasp_success_bonus = torch.where(
             is_grasped,
-            torch.ones_like(is_grasped) * torch.clamp(obj_z_pos / self.cfg.height_bonus_threshold, max=1) * torch.mean(is_contact, dim=-1) * self.cfg.grasp_reward_scale,
+            torch.ones_like(is_grasped) * torch.clamp(obj_z_pos / self.cfg.height_bonus_threshold, max=1) * torch.mean(is_contact.float(), dim=-1) * self.cfg.grasp_reward_scale,
             torch.zeros_like(is_grasped)
         )
 
         rewards = dist_reward + vel_penalty + grasp_success_bonus + obj_z_pos_reward + contacts_reward + obj_rot_penalty#  + force_penalty
 
-        # print(f"rewards: {rewards}")
         def safe_mean(x, mask=None):
             if mask is not None:
                 return safe_mean(x[mask])
