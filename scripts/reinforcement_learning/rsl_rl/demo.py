@@ -83,7 +83,7 @@ def main():
     # env_cfg.off_camera_sensor = False
     env_cfg.robot_name = "shadow-multi"
     env_cfg.object_type = "ycb"
-    env_cfg.episode_length_s *= 8
+    env_cfg.episode_length_s *= 3
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # specify directory for logging experiments

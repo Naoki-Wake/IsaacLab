@@ -44,6 +44,9 @@ from .env_cfg import get_obj_cfg, ObjCfg
 from isaaclab.sensors import CameraCfg, Camera
 from isaaclab.sensors import TiledCamera, TiledCameraCfg, save_images_to_file
 from isaaclab.sensors.camera.utils import create_pointcloud_from_depth
+from isaaclab.sim.spawners.materials.physics_materials_cfg import RigidBodyMaterialCfg
+from isaaclab.sim.spawners.materials.physics_materials import spawn_rigid_body_material
+from isaaclab.sim.utils import bind_physics_material
 
 import cv2
 
@@ -405,6 +408,17 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self.scene.rigid_objects["table"] = self._table
         self.scene.rigid_objects["obj"] = self._obj
 
+        if self.env_cfg.mat_cfg is not None:
+            material_prim = spawn_rigid_body_material(
+                prim_path="/World/Materials/ObjMaterial",
+                cfg=self.env_cfg.mat_cfg
+            )
+            for i in range(self.num_envs):
+                bind_physics_material(
+                    prim_path=f"/World/envs/env_{i}/Object",
+                    material_path=material_prim.GetPrimPath()
+                )
+
         if not self.robot_cfg.off_contact_sensor:
             self._contact_sensor = ContactSensor(self.robot_cfg.contact_sensor)
             self.scene.sensors["contact_sensor"] = self._contact_sensor
@@ -616,7 +630,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         # self._get_obj_scale(get_current_stage(), env_ids=env_ids)  # Ensure obj scales are set
 
         # Add some random rotation to the obj
-        obj_rot_base = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(num_envs_to_reset, 1)
+        obj_rot_base = torch.tensor(self.env_cfg.reset_obj_rot, device=self.device).repeat(num_envs_to_reset, 1)
         obj_vel = torch.zeros((num_envs_to_reset, 6), device=self.device)
 
         # Write to sim
@@ -786,8 +800,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
         }
         contact_center = self.reference_traj_info.contact_center_world[key]
         self.hand2obj[key] = compute_object_state_in_hand_frame(
-            self._obj.data.root_pos_w,  self._obj.data.root_quat_w,
-            #contact_center, self.obj_rot,
+            # self._obj.data.root_pos_w,  self._obj.data.root_quat_w,
+            contact_center, self.obj_rot,
             self._obj.data.root_lin_vel_w, self._obj.data.root_ang_vel_w,
             self._robot.data.body_pos_w[:, self.eef_link_idx[key]], self._robot.data.body_quat_w[:, self.eef_link_idx[key]],
             self._robot.data.body_lin_vel_w[:, self.eef_link_idx[key]], self._robot.data.body_ang_vel_w[:, self.eef_link_idx[key]],

@@ -20,149 +20,6 @@ def compute_center(contact_web_position):
     center = (min_pos + max_pos) / 2.0
     return center
 
-# class ReferenceTrajInfo:
-#     def __init__(self, num_envs, device, finger_coupling_rule: callable, n_hand_joints: int, mode: str, pick_height:float=0.05):
-#         # placeholder for the reference trajectory
-#         self.num_envs = num_envs
-#         self.device = device
-
-#         self.handP_world = torch.zeros((num_envs, 3), device=device)
-#         self.handQ_world = torch.zeros((num_envs, 4), device=device)
-#         self.handP_world_pre = torch.zeros((num_envs, 3), device=device)
-#         self.handQ_world_pre = torch.zeros((num_envs, 4), device=device)
-#         self.hand_preshape_joint = torch.zeros((num_envs, n_hand_joints), device=device)
-#         self.hand_shape_joint = torch.zeros((num_envs, n_hand_joints), device=device)
-
-#         self.pick_flg = torch.zeros((num_envs,), device=device).bool()
-#         self.all_done = torch.zeros((num_envs,), device=device).bool()  # Flag to indicate if all tasks are done
-
-#         # The ratio of the total timestep used for end-effector and finger motion.
-#         self.move_to = [0., 0., pick_height]
-#         if mode == "train":
-#             self.subtasks_span = {
-#                 "approach": [0.0, 0.5], "grasp": [0.5, 0.8], "pick": [0.8, 1.0],
-#             }
-#         elif mode == "demo":
-#             self.subtasks_span = {
-#                 "approach": [0.0, 0.25], "grasp": [0.25, 0.5], "pick": [0.5, 1.0],
-#             }
-#             self.move_to = [0., 0.1, 0.1]  # pick height is halved for demo mode
-#         else:
-#             self.subtasks_span = {
-#                 "approach": [0.0, 0.25], "grasp": [0.25, 0.4], "pick": [0.4, 1.0],
-#             }
-
-#         self._pick_diff = torch.tensor(self.move_to, device=self.device).unsqueeze(0)
-#         self.finger_couping_rule = finger_coupling_rule
-
-#     def update(self, env_slice, handP_world, handQ_world, handP_world_pre, handQ_world_pre, hand_preshape_joint, hand_shape_joint, reset=False):
-#         """Update the reference trajectory for the given environment slice"""
-#         self.handP_world[env_slice] = handP_world.float()
-#         self.handQ_world[env_slice] = handQ_world.float()
-#         self.handP_world_pre[env_slice] = handP_world_pre.float()
-#         self.handQ_world_pre[env_slice] = handQ_world_pre.float()
-#         self.hand_preshape_joint[env_slice] = hand_preshape_joint.float()
-#         self.hand_shape_joint[env_slice] = hand_shape_joint.float()
-#         if reset:
-#             self.pick_flg[env_slice] = False
-#             self.all_done[env_slice] = False  # Reset the done flag for the environment slice
-
-#     def _get_eef_reftraj(self, env_slice, interp_ratio, action_handP=None, action_handQ=None):
-#         """Get the reference trajectory for the given environment slice"""
-#         # Interpolate the reference trajectory
-#         if interp_ratio.ndim == 1:
-#             interp_ratio = interp_ratio[:, None]
-#         interp_pos = (1 - interp_ratio) * self.handP_world_pre[env_slice] + interp_ratio * self.handP_world[env_slice]
-#         interp_quat = quat_slerp_batch(self.handQ_world_pre[env_slice], self.handQ_world[env_slice], interp_ratio)
-
-#         if action_handP is not None:
-#             interp_pos = interp_pos + action_handP
-
-#         if action_handQ is not None:
-#             interp_quat = quat_mul(action_handQ, interp_quat)
-
-#         return interp_pos.float(), interp_quat.float()
-
-#     def _get_finger_reftraj(self, env_slice, interp_ratio, action_hand_joint=None):
-#         """Get the reference trajectory for the given environment slice"""
-#         # Interpolate the reference trajectory
-#         if interp_ratio.ndim == 1:
-#             interp_ratio = interp_ratio[:, None]
-#         finger_pos = (1 - interp_ratio) * self.hand_preshape_joint[env_slice] + interp_ratio * self.hand_shape_joint[env_slice]
-
-#         if action_hand_joint is not None:
-#             finger_pos = finger_pos + action_hand_joint
-
-#         finger_pos = self.finger_couping_rule(finger_pos)
-#         return finger_pos.float()
-
-#     def _get_timestep_subtasks(self, timestep):
-#         timestep_subtasks = {}
-#         for subtask, (start, end) in self.subtasks_span.items():
-#             timestep_subtask = (timestep - start) / (end - start)
-#             if subtask == "pick":
-#                 # pick in the first half of the timestep, then stop (i.e., clmaped to 1)
-#                 timestep_subtask *= 2
-
-#             timestep_subtasks[subtask] = torch.clamp(timestep_subtask, 0, 1)
-#         return timestep_subtasks
-
-#     def get(self, env_slice, timestep, current_handP_world=None, current_handQ_world=None, current_hand_joint=None, action_handP=None, action_handQ=None, action_hand_joint=None):
-#         """Get the reference trajectory for the given environment slice"""
-#         # Get the reference trajectory for the end-effector
-#         timestep_subtasks = self._get_timestep_subtasks(timestep)
-#         eef_pos, eef_quat = self._get_eef_reftraj(env_slice, timestep_subtasks["approach"], action_handP, action_handQ)
-#         finger_pos = self._get_finger_reftraj(env_slice, timestep_subtasks["grasp"], action_hand_joint)
-
-#         _pick_mask = timestep_subtasks["pick"] > 0
-#         if _pick_mask.any():
-#             assert (current_handP_world is not None) and (current_handQ_world is not None) and (current_hand_joint is not None), "current_handP_world, current_handQ_world, current_hand_joint must be provided for pick subtask"
-#             # Get the reference trajectory for the pick.
-#             # Set the pick goal to be X cm above the current hand position while keeping the orientation and finger position the same.
-#             env_indices = torch.arange(env_slice.start, env_slice.stop, device=self.device) # changed to tensor index
-#             _pick_first_mask = torch.logical_and(_pick_mask, ~self.pick_flg[env_indices]) # only update the target eef position in the first timestep
-
-#             env_indices_pick, env_indices_pick_first = env_indices[_pick_mask], env_indices[_pick_first_mask]
-
-#             if env_indices_pick_first.numel() > 0:
-#                 # Safely update reference trajectory
-#                 self.update(
-#                     env_indices_pick_first,
-#                     (current_handP_world + self._pick_diff)[_pick_first_mask], current_handQ_world[_pick_first_mask],
-#                     current_handP_world[_pick_first_mask], current_handQ_world[_pick_first_mask],
-#                     current_hand_joint[_pick_first_mask], current_hand_joint[_pick_first_mask],
-#                 )
-#                 self.pick_flg[env_indices_pick_first] = True
-#             eef_pos[env_indices_pick], eef_quat[env_indices_pick] = self._get_eef_reftraj(env_indices_pick, timestep_subtasks["pick"][_pick_mask])
-#             finger_pos[env_indices_pick] = self._get_finger_reftraj(env_indices_pick, timestep_subtasks["pick"][_pick_mask])
-
-#         # check all task is completed using timestep_subtasks
-#         self.all_done[env_slice] = timestep >= 1.0
-#         return eef_pos, eef_quat, finger_pos
-
-# class ReferenceTrajInfoMulti():
-#     def __init__(self, keys, num_envs, device, hand_module, mode: str, pick_height:float=0.05):
-#         self._keys = keys
-#         self.device = device
-#         self.ref_traj_info = {
-#             key: ReferenceTrajInfo(
-#                 num_envs, device,
-#                 hand_module[key].couplingRuleTensor, len(hand_module[key].hand_full_joint_names),
-#                 mode, pick_height
-#             ) for key in keys
-#         }
-
-#     def get(self, key, *args, **kwargs):
-#         return self.ref_traj_info[key].get(*args, **kwargs)
-
-#     def update(self, key, *args, **kwargs):
-#         self.ref_traj_info[key].update(*args, **kwargs)
-
-#     def __getattr__(self, name):
-#         if name.startswith('_'):
-#             raise AttributeError(f"{name} is private.")
-#         return {key: getattr(self.ref_traj_info[key], name) for key in self._keys}
-
 
 class HandUtils:
     def __init__(self, grasp_type, hand_laterality="right"):
@@ -180,13 +37,26 @@ class HandUtils:
                 np.cos(np.deg2rad(theta))*np.sin(np.deg2rad(phi)),
                 np.sin(np.deg2rad(theta))]
 
+    # def calcHandQuaternionXfrontZupPassive(self, theta, phi):
+    #     q_z_base = transformations.quaternion_about_axis(np.deg2rad(180), [0, 0, 1])
+    #     q_y_base = transformations.quaternion_about_axis(np.deg2rad(90), [0, 1, 0])
+    #     # q_z_theta = transformations.quaternion_about_axis(0, [0, 0, 1]) # no rotation around Z-axis
+    #     q_z_theta = transformations.quaternion_about_axis(np.deg2rad(180 + phi - self._hand_angle_offset), [0, 0, 1]) #  - self._hand_angle_offset
+    #     return transformations.quaternion_multiply(q_z_theta,
+    #                                                transformations.quaternion_multiply(q_y_base, q_z_base))
+
     def calcHandQuaternionXfrontZupPassive(self, theta, phi):
-        q_z_base = transformations.quaternion_about_axis(np.deg2rad(180), [0, 0, 1])
-        q_y_base = transformations.quaternion_about_axis(np.deg2rad(90), [0, 1, 0])
-        # q_z_theta = transformations.quaternion_about_axis(0, [0, 0, 1]) # no rotation around Z-axis
-        q_z_theta = transformations.quaternion_about_axis(np.deg2rad(180 + phi - self._hand_angle_offset), [0, 0, 1]) #  - self._hand_angle_offset
-        return transformations.quaternion_multiply(q_z_theta,
-                                                   transformations.quaternion_multiply(q_y_base, q_z_base))
+            # Step 1: base rotation (X: 180, Y: 0, Z: -90)
+        q_base = transformations.quaternion_from_euler(np.deg2rad(180), np.deg2rad(0), np.deg2rad(-90), axes='rxyz')
+        # import pdb; pdb.set_trace()
+        # Step 2: rotation around world Y-axis: -(90 - theta)
+        q_y_theta = transformations.quaternion_about_axis(
+            np.deg2rad(-(90 - theta) - self._hand_angle_offset), [0, 1, 0]
+        )
+        # Step 3: apply q_y_theta * q_base (left rotation applied in world frame)
+        q = transformations.quaternion_multiply(q_y_theta, q_base)
+        return q
+
 
     def calcHandQuaternionXfrontZupActive(self, theta, phi):
         # Step 1: base rotation (X: 180, Y: 0, Z: -90)
@@ -260,12 +130,12 @@ class HandUtils:
     def getReferenceTrajParams(self, grasp_type, num_envs) -> dict:
         """Get the parameters for the reference trajectory based on the grasp type."""
         param = {}
-        if grasp_type == "active":
+        if grasp_type in ["active", "passive"]:
             param["grasp_approach_vertical"] = np.random.uniform(90, 90, size=num_envs).tolist()
             param["grasp_approach_horizontal"] = np.zeros(num_envs).tolist()
-        elif grasp_type == "passive":
-            param["grasp_approach_vertical"] = np.zeros(num_envs).tolist()
-            param["grasp_approach_horizontal"] = np.random.uniform(-90, -90, size=num_envs).tolist()
+        # elif grasp_type == "passive":
+        #     param["grasp_approach_vertical"] = np.zeros(num_envs).tolist()
+        #     param["grasp_approach_horizontal"] = np.random.uniform(-90, -90, size=num_envs).tolist()
         param["back"] = (0.15 * np.ones(num_envs)).tolist()  # back off distance
         return param
 
@@ -619,11 +489,80 @@ class CWPPredictor(object):
                 torch.stack([-obj_scale[:, 0], torch.zeros_like(half_z), torch.zeros_like(half_z)], dim=1), # rh_thdistal
                 torch.stack([torch.zeros_like(half_z), -obj_scale[:, 1], torch.zeros_like(half_z)], dim=1)  # rh_palm
             ], dim=1)  # shape: [N, 5, 3]
+            deg2rad = lambda deg: deg * torch.pi / 180
+            q_x = quat_from_euler_xyz(
+                roll=torch.tensor(deg2rad(90)),
+                pitch=torch.tensor(deg2rad(0)),
+                yaw=torch.tensor(deg2rad(0))
+            )
+            local_rotation = q_x[None, :].expand(obj_scale.shape[0], 4).to(self.device)
 
         local_position = cwp_local + offset[None, None, :]  # [N, P, 3]
         return local_position, local_rotation
 
     def predict_ycb(self, obj_scale):
+        offset = torch.zeros(3, device=self.device)  # default offset
+        local_rotation = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).expand(obj_scale.shape[0], 4)  # [N, 4]
+        if self.grasp_type == "active":
+            # ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal"]
+            # obj_center [x, y, z]
+            height = obj_scale[:, 2]# torch.clamp(obj_scale[:, 2] - 0.03, min=0.0)  # [N]# 3 cm down from the top of the object
+            depth = torch.ones_like(height) * 0.03  # [N] # 3 cm depth for the contact web position
+            finger_interval = torch.ones_like(height) * 0.03  # [N] # 2 cm interval between fingers
+            cwp_local = torch.stack([
+                torch.stack([depth, finger_interval, height], dim=1),               # rh_ffdistal
+                torch.stack([depth, torch.zeros_like(height), height], dim=1),           # rh_mfdistal
+                torch.stack([depth, -finger_interval, height], dim=1),              # rh_rfdistal
+                torch.stack([-depth, torch.zeros_like(height), height], dim=1)           # rh_thdistal
+            ], dim=1)  # shape: [N, 4, 3]
+            # to object coodinates
+            deg2rad = lambda deg: deg * torch.pi / 180
+            q_z = quat_from_euler_xyz(
+                roll=torch.tensor(deg2rad(90)),
+                pitch=torch.tensor(deg2rad(0)),
+                yaw=torch.tensor(deg2rad(0))
+            )
+            q_y = quat_from_euler_xyz(
+                roll=torch.tensor(deg2rad(0)),
+                pitch=torch.tensor(deg2rad(-90)),
+                yaw=torch.tensor(deg2rad(0))
+            )
+            q = quat_mul(q_y, q_z)
+            local_rotation = q[None, :].expand(obj_scale.shape[0], 4).to(self.device)
+
+            offset = torch.Tensor([0.02, -0.08, -0.03]).to(self.device)  # offset for passive grasp
+        elif self.grasp_type == "passive":
+            ### TODO : check the finger offset for passive grasp
+            height = torch.ones_like(obj_scale[:, 2]) * 0.08  # [N] # 10 cm down from the top of the object
+            # torch.clamp(obj_scale[:, 2] - 0.03, min=0.0)  # [N]# 3 cm down from the top of the object
+            depth = torch.ones_like(height) * 0.03  # [N] # 3 cm depth for the contact web position
+            finger_interval = torch.ones_like(height) * 0.03  # [N] # 2 cm interval between fingers
+            cwp_local = torch.stack([
+                torch.stack([depth, finger_interval, torch.zeros_like(height)], dim=1),               # rh_ffdistal
+                torch.stack([depth, torch.zeros_like(height), torch.zeros_like(height)], dim=1),           # rh_mfdistal
+                torch.stack([depth, -finger_interval, torch.zeros_like(height)], dim=1),              # rh_rfdistal
+                torch.stack([-depth, torch.zeros_like(height), torch.zeros_like(height)], dim=1),
+                torch.stack([torch.zeros_like(height), torch.zeros_like(height), height], dim=1)
+            ], dim=1)  # shape: [N, 4, 3]
+            # to object coodinates
+            deg2rad = lambda deg: deg * torch.pi / 180
+            q_z = quat_from_euler_xyz(
+                roll=torch.tensor(deg2rad(0)),
+                pitch=torch.tensor(deg2rad(0)),
+                yaw=torch.tensor(deg2rad(180))
+            )
+            local_rotation = q_z[None, :].expand(obj_scale.shape[0], 4).to(self.device)
+            offset = torch.Tensor([0.05, 0.0, -0.05]).to(self.device)  # offset for passive grasp
+        else:
+            raise ValueError(f"Unsupported grasp type: {self.grasp_type}")
+
+        local_position = cwp_local
+        local_position = quat_apply(local_rotation[:, None, :].repeat(1, local_position.shape[1], 1), local_position)
+        local_position = local_position + offset[None, None, :]  # [N, P, 3]
+        return local_position, local_rotation
+
+
+    def predict_ycb_clearner(self, obj_scale):
         offset = torch.zeros(3, device=self.device)  # default offset
         local_rotation = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).expand(obj_scale.shape[0], 4)  # [N, 4]
         if self.grasp_type == "active":

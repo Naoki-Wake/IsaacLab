@@ -5,7 +5,7 @@ import numpy as np
 
 # Read output directory from command-line argument
 if len(sys.argv) < 2:
-    print("Usage: python generate_superquadrics_with_mtl.py <output_obj_directory>")
+    print("Usage: python create_sq_mesh.py <output_obj_directory>")
     sys.exit(1)
 
 output_dir = sys.argv[1]

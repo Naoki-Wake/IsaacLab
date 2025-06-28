@@ -77,10 +77,8 @@ class ReferenceTrajInfo:
                 # {"name": "init",     "start": 0.00, "end": 0.05},
                 {"name": "approach", "start": 0.00, "end": 0.40},
                 {"name": "grasp",    "start": 0.40, "end": 0.80},
-                {"name": "bring",     "start": 0.80, "end": 0.9,
-                 "param": {"delta": [0.0, 0.0, pick_height]}},
-                {"name": "bring",     "start": 0.9, "end": 1.00,
-                 "param": {"delta": [0.0, 0.0, 0.0]}},
+                {"name": "bring",     "start": 0.80, "end": 0.9, "param": {"delta": [0.0, 0.0, pick_height]}},
+                {"name": "bring",     "start": 0.9, "end": 1.00, "param": {"delta": [0.0, 0.0, 0.0]}},
                 # {"name": "release",  "start": 0.80, "end": 1.00,
                 #  "param": {"open_pose": open_pose.tolist()}},
             ]
@@ -94,12 +92,25 @@ class ReferenceTrajInfo:
         #          "param": {"delta": [0.0, 0.0, 0.0]}},
         #     ]
         elif mode == "demo":
+            # debug
             if self.hand_module.hand_laterality == "left":
                 subtasks = [
                     # {"name": "init",     "start": 0.00, "end": 0.05},
-                    {"name": "approach", "start": 0.00, "end": 0.1},
-                    {"name": "grasp",    "start": 0.1, "end": 0.2},
-                    {"name": "bring",     "start": 0.2, "end": 0.4,  "param": {"delta": [0.0, -0.0, 0.1]}},
+                    {"name": "approach", "start": 0.0, "end": 0.4},
+                    {"name": "grasp",    "start": 0.4, "end": 0.7},
+                    {"name": "bring",     "start": 0.7, "end": 1.0,  "param": {"delta": [0.0, -0.0, 0.1]}},
+                ]
+            else:
+                subtasks = [
+                    {"name": "init",     "start": 0.00, "end": 1.0, "param": {"init_pose": ([0.0, -0.5, 1.5], [0.1228, 0.6964, 0.6964, 0.1228])}},
+                ]
+
+            if self.hand_module.hand_laterality == "left":
+                subtasks = [
+                    # {"name": "init",     "start": 0.00, "end": 0.05},
+                    {"name": "approach", "start": 0.00, "end": 0.2},
+                    {"name": "grasp",    "start": 0.2, "end": 0.3},
+                    {"name": "bring",     "start": 0.3, "end": 0.4,  "param": {"delta": [0.0, -0.0, 0.1]}},
                     {"name": "bring",     "start": 0.4, "end": 0.7,  "param": {"delta": [0.0, 0.0, 0.0]}},
                     {"name": "release",  "start": 0.7, "end": 0.8},
                     {"name": "bring",     "start": 0.8, "end": 1.0,  "param": {"delta": [0.0, 0.2, 0.0]}},
@@ -111,6 +122,9 @@ class ReferenceTrajInfo:
                     {"name": "grasp",    "start": 0.5, "end": 0.6},
                     {"name": "bring",     "start": 0.6, "end": 1.0,  "param": {"delta": [0.0, 0.0, 0.0]}},
                 ]
+                # subtasks = [
+                #     {"name": "init",     "start": 0.00, "end": 1.0, "param": {"init_pose": ([0.0, -0.5, 1.5], [0.1228, 0.6964, 0.6964, 0.1228])}},
+                # ]
 
         for st in subtasks:
             st.setdefault("param", {})

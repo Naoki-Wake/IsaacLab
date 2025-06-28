@@ -3,6 +3,7 @@ import glob
 
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 import isaaclab.sim as sim_utils
+from isaaclab.sim.spawners.materials.physics_materials_cfg import RigidBodyMaterialCfg
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.assets import RigidObject, RigidObjectCfg
 
@@ -12,6 +13,7 @@ class ObjCfg():
         self.mode = mode
         self.grasp_type = grasp_type
         self.obj_size_half: tuple[float, float, float] = (0.05, 0.05, 0.05)  # Half size for cuboid objects
+        self.reset_obj_rot = (1.0, 0.0, 0.0, 0.0)
         self._obj_cfg = {}
         self.table_height = 0.8
         table_size = (0.8, 0.8, self.table_height)
@@ -35,6 +37,7 @@ class ObjCfg():
                 rot=(0.0, 0.0, 0.0, 1.0)
             )
         )
+        self.mat_cfg = None
 
     def get_obj_cfg(self, key: str):
         return self._obj_cfg[key]
@@ -44,13 +47,14 @@ class YCBObjCfg(ObjCfg):
     def __init__(self, mode: str, grasp_type: str = "active"):
         super().__init__(mode=mode, grasp_type=grasp_type)
         self.obj_type = "ycb"
+        self.reset_obj_rot = (0.5, -0.5, 0.5, -0.5)  # Reset rotation for YCB objects
 
         self._obj_cfg["obj"] = RigidObjectCfg(
             prim_path="/World/envs/env_.*/Object",  # Must match env pattern
             spawn=sim_utils.UsdFileCfg(
-                # usd_path=f"source/isaaclab_assets/data/Props/035_power_drill.usd",
-                usd_path=f"source/isaaclab_assets/data/Props/021_bleach_cleaner.usd",
-                scale=(0.8, 1.3, 1.3),  # Scale the object to fit the scene
+                usd_path=f"source/isaaclab_assets/data/Props/035_power_drill.usd",
+                # usd_path=f"source/isaaclab_assets/data/Props/021_bleach_cleaner.usd",
+                scale=(1.0, 1.0, 1.0),  # Scale the object to fit the scene
                 # usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/YCB/Axis_Aligned/035_power_drill.usd",
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(
                     max_depenetration_velocity=1000,
@@ -64,7 +68,7 @@ class YCBObjCfg(ObjCfg):
                     max_linear_velocity=100,
                     max_angular_velocity=100
                 ),
-                mass_props=sim_utils.MassPropertiesCfg(mass=0.01),
+                mass_props=sim_utils.MassPropertiesCfg(mass=0.001),
                 collision_props=sim_utils.CollisionPropertiesCfg(
                     collision_enabled=True
                 ),
@@ -72,9 +76,17 @@ class YCBObjCfg(ObjCfg):
             ),
             init_state=RigidObjectCfg.InitialStateCfg(
                 pos=(0.0, 0.0, self.table_height),  # Spawn above table/ground
-                rot=(1.0, 0.0, 0.0, 0.0)
+                rot=self.reset_obj_rot
             )
         )
+
+        self.mat_cfg = RigidBodyMaterialCfg(
+            static_friction=10,
+            dynamic_friction=9,
+            restitution=0.0,
+            friction_combine_mode="average"
+        )
+
 
 class SQObjCfg(ObjCfg):
     def __init__(self, mode: str, grasp_type: str = "active"):
