@@ -2,7 +2,7 @@ import torch
 from typing import Callable, List, Optional, Sequence, Tuple, Dict, Any
 
 from isaaclab_tasks.utils._math import quat_slerp_batch
-from source.isaaclab.isaaclab.utils.math import quat_mul
+from isaaclab.utils.math import quat_mul
 
 # -----------------------------------------------------------------------------
 #  Main class
