@@ -9,7 +9,7 @@ from isaaclab_tasks.utils._math import quat_slerp_batch
 from isaaclab_tasks.utils.third_party.tf import transformations
 from isaaclab_tasks.utils.third_party.urdf_parser_py.urdf import URDF
 import isaaclab_tasks.utils.fk_using_urdf as urdf_fk
-from source.isaaclab.isaaclab.utils.math import quat_apply, quat_from_euler_xyz, quat_mul
+from isaaclab.isaaclab.utils.math import quat_apply, quat_from_euler_xyz, quat_mul
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
