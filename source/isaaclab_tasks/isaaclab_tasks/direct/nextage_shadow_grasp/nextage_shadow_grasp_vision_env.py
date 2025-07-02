@@ -288,6 +288,7 @@ class NextageShadowGraspVisionEnv(NextageShadowGraspEnv):
             #import pdb; pdb.set_trace()
         # clear self.gpt_progress[env_id]
         self.gpt_progress[:] = 0.0
+        #import pdb; pdb.set_trace()
         return rewards
 
 

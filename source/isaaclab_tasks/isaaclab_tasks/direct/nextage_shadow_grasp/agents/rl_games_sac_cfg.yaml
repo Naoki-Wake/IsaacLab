@@ -37,9 +37,9 @@ params:
       scale_value: 1.0
 
     max_epochs: 10000
-    num_steps_per_episode: 5 #23
-    save_best_after: 500
-    save_frequency: 500
+    num_steps_per_episode: 23 #23
+    save_best_after: 1000
+    save_frequency: 1000
     gamma: 0.99
     init_alpha: 1
     alpha_lr: 5e-3
