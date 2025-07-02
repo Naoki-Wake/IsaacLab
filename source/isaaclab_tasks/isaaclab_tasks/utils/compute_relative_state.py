@@ -1,11 +1,13 @@
 import torch
 from isaaclab.utils.math import quat_apply, quat_inv, quat_mul
 
-def compute_object_state_in_hand_frame(
+def compute_state_in_hand_frame(
     object_pos_w: torch.Tensor, object_quat_w: torch.Tensor,
-    object_lin_vel_w: torch.Tensor, object_ang_vel_w: torch.Tensor,
     hand_pos_w: torch.Tensor, hand_quat_w: torch.Tensor,
-    hand_lin_vel_w: torch.Tensor, hand_ang_vel_w: torch.Tensor,
+    object_lin_vel_w: torch.Tensor | None = None,
+    object_ang_vel_w: torch.Tensor | None = None,
+    hand_lin_vel_w: torch.Tensor | None = None,
+    hand_ang_vel_w: torch.Tensor | None = None,
     debug: bool = False,
 ) -> dict:
     """
@@ -26,6 +28,13 @@ def compute_object_state_in_hand_frame(
 
     pos_obj_in_hand = quat_apply(hand_quat_inv, object_pos_w - hand_pos_w)
     quat_obj_in_hand = quat_mul(hand_quat_inv, object_quat_w)
+    result = {
+        "pos": pos_obj_in_hand,
+        "quat": quat_obj_in_hand,
+    }
+    if object_lin_vel_w is None or object_ang_vel_w is None or hand_lin_vel_w is None or hand_ang_vel_w is None:
+        return result
+
     lin_vel_in_hand = quat_apply(hand_quat_inv, object_lin_vel_w - hand_lin_vel_w)
     ang_vel_in_hand = quat_apply(hand_quat_inv, object_ang_vel_w - hand_ang_vel_w)
 

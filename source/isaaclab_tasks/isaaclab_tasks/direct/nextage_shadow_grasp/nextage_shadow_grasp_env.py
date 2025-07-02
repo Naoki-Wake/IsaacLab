@@ -37,7 +37,7 @@ from isaaclab_tasks.utils._math import euler_xyz_from_quat
 #from isaaclab_tasks.utils.hand_utils import ReferenceTrajInfoMulti, CWPPredictor
 from isaaclab_tasks.utils.hand_utils import CWPPredictor
 from isaaclab_tasks.utils.traj_utils import ReferenceTrajInfoMulti
-from isaaclab_tasks.utils.compute_relative_state import compute_object_state_in_hand_frame
+from isaaclab_tasks.utils.compute_relative_state import compute_state_in_hand_frame
 from .events import EventCfg, create_grasp_event_cfg
 from .robot_cfg import get_robot_cfg, RobotCfg
 from .env_cfg import get_obj_cfg, ObjCfg
@@ -444,7 +444,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         self._obj_sq_params = self._infer_sq_params(stage)
         self._obj_scales = self._get_obj_scale(stage)
 
-        self.hand_only_sim = self.cfg.robot_name == "shadow"
+        self.hand_only_sim = self.cfg.robot_name in ["shadow", "shadow-multi"]
 
     # pre-physics step calls
     def _pre_physics_step(self, actions: torch.Tensor):
@@ -485,7 +485,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         if self.hand_only_sim:
             return self._solve_ik_(env_ids, ik_target_pos, ik_target_rot, key)
             # # TODO simple IK solver for the base joint
-            # return self._solve_base_joint(env_ids, ik_target_pos, ik_target_rot)
+            # return self._solve_base_joint(env_ids, ik_target_pos, ik_target_rot, key)
         else:
             return self._solve_ik_(env_ids, ik_target_pos, ik_target_rot, key)
 
@@ -575,8 +575,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
             )
             arm_targets, self.ik_fail = self._solve_ik(env_slice, self.ik_target_pos[hand_key], self.ik_target_rot[hand_key], hand_key)
 
-            ### Fingers
-            # finger_targets = finger_targets + ~self.reference_traj_info.pick_flg[env_slice, None] * actions[env_slice, len(self.arm_indices):-1] * self.action_scale[None, len(self.arm_indices):-1]
+            ## Fingers
             self.robot_dof_targets[env_slice, self.arm_indices[hand_key]] = torch.clamp(arm_targets, self.robot_dof_lower_limits[self.arm_indices[hand_key]], self.robot_dof_upper_limits[self.arm_indices[hand_key]])
             self.robot_dof_targets[env_slice, self.hand_full_indices[hand_key]] = self.finger_targets[hand_key] # torch.clamp(finger_targets, self.robot_dof_lower_limits[self.hand_full_indices], self.robot_dof_upper_limits[self.hand_full_indices])
 
@@ -587,8 +586,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
         return hand_pos, hand_rot
 
     def _apply_action(self):
-        # import pdb;pdb.set_trace()
-        # self.robot_dof_targets[:, self._robot.joint_names.index("HEAD_JOINT1")] = 0.32
         self._robot.set_joint_position_target(self.robot_dof_targets)
 
     # post-physics step calls
@@ -600,7 +597,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
         # Terminate if the obj moves more than 0.15m horizontally from initial position
         out_of_bounds = obj_horizontal_displacement > 0.15
 
-        terminated = out_of_bounds # | self.ik_fail # too_high
+        terminated = torch.zeros_like(out_of_bounds) # | self.ik_fail # too_high
         truncated = self.episode_length_buf >= self.max_episode_length - 1
 
         #camera_images = self._camera.data.output["rgb"]
@@ -640,8 +637,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
         joint_pos = self._robot.data.default_joint_pos[env_ids]
         joint_vel = torch.zeros_like(joint_pos)
 
-        # Hack to obtain object location
-
         self._compute_intermediate_values(env_ids)
 
         for key in self.reference_traj_keys:
@@ -657,18 +652,17 @@ class NextageShadowGraspEnv(DirectRLEnv):
                 objectQ_world=self.obj_rot[env_ids],
                 objectScale=self._obj_scales[env_ids],
             )
-            # ik_target_pos, ik_target_rot, finger_targets = self.reference_traj_info.get(key, env_ids, torch.tensor([0.0] * num_envs_to_reset, device=self.device))
-            # ik_target_pos, ik_target_rot, finger_targets = self.reference_traj_info.get(env_ids, torch.tensor([0.0] * num_envs_to_reset, device=self.device))
             arm_targets, ik_fail = self._solve_ik(env_ids, ik_target_pos, ik_target_rot, key)
 
             joint_pos[:, self.arm_indices[key]] = arm_targets
             joint_pos[:, self.hand_full_indices[key]] = finger_targets
 
-        joint_pos = torch.clamp(joint_pos, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
+        # joint_pos = torch.clamp(joint_pos, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
+        # joint_pos = self._robot.data.default_joint_pos[env_ids].clone()
         joint_vel = torch.zeros_like(joint_pos)
 
         self._robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
-        self.robot_dof_targets[env_ids] = joint_pos.clone()
+        # self.robot_dof_targets[env_ids] = joint_pos.clone()
 
         self.obj_initial_pos[env_ids] = obj_pos.clone()
         self.obj_initial_rot[env_ids] = obj_rot_base.clone()
@@ -700,6 +694,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
                     prev_actions = self.actions[hand_idx]
             else:
                 prev_actions = self.actions
+                # if hand_key == "right":
+                #     prev_actions = torch.zeros_like(prev_actions)
 
             _obs = self._get_observations_hand(hand_key=hand_key, prev_actions=prev_actions)
             obs.append(_obs)
@@ -712,8 +708,18 @@ class NextageShadowGraspEnv(DirectRLEnv):
     def _get_observations_hand(self, hand_key, prev_actions) -> dict:
         self._compute_intermediate_values()
 
+        # diff_finger = [
+        #     (self.target_finger_pos[hand_key][finger] - self.current_finger_pos[hand_key][finger]) for finger in self.target_finger_pos[hand_key].keys()
+        # ]
+        # WARN: in hand frame
+        # The code `diff_finger` is not a valid Python syntax. It seems like it is a placeholder or a function name that
+        # is not defined in the provided context. If you provide more information or context about the code, I can help
+        # you understand its purpose or suggest possible corrections.
         diff_finger = [
-            (self.target_finger_pos[hand_key][finger] - self.current_finger_pos[hand_key][finger]) for finger in self.target_finger_pos[hand_key].keys()
+            compute_state_in_hand_frame(
+                self.target_finger_pos[hand_key][finger], self.reference_traj_info.cwp_quat[hand_key],
+                self.current_finger_pos[hand_key][finger], self._robot.data.body_quat_w[:, self.eef_link_idx[hand_key]],
+            )["pos"] for finger in self.target_finger_pos[hand_key].keys()
         ]
         dof_pos_scaled = (
             2.0
@@ -725,10 +731,6 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         obs = torch.cat(
             (
-                # _to_local(cur_eef_pos),
-                # cur_eef_rot,
-                # _to_local(self.obj_pos),
-                # self.obj_rot,
                 self.hand2obj[hand_key]["pos"],
                 self.hand2obj[hand_key]["quat"],
                 dof_pos_scaled,
@@ -776,51 +778,47 @@ class NextageShadowGraspEnv(DirectRLEnv):
             env_ids = self._robot._ALL_INDICES
 
         for hand_key in self.reference_traj_keys:
-            self.ref_finger_pos[hand_key][env_ids] = self.reference_traj_info.cwp[hand_key][env_ids]
+            self.ref_finger_pos[hand_key][env_ids] = self.reference_traj_info.cwp_pos[hand_key][env_ids]
 
         self._obj.update(self.dt)
         self.obj_pos[env_ids] = self._obj.data.root_pos_w[env_ids]
         self.obj_rot[env_ids] = self._obj.data.root_quat_w[env_ids]
 
-        # if not self.robot_cfg.off_camera_sensor:
-        #     self._camera.update(self.dt)
-        # if not self.robot_cfg.off_contact_sensor:
-        #     self._contact_sensor.update(self.dt)
         for hand_key in self.reference_traj_keys:
-            self._compute_intermediate_values_hand(env_ids, key=hand_key)
+            self._compute_intermediate_values_hand(env_ids, hand_key=hand_key)
         # # Update only the specified environments
 
-    def _compute_intermediate_values_hand(self, env_ids: torch.Tensor | None = None, key=None):
-        self.current_finger_pos[key] = {
-            k: self._robot.data.body_pos_w[:, link_idx] for k, link_idx in zip(self.hand_util[key].position_tip_links, self.position_tip_link_indices[key])
+    def _compute_intermediate_values_hand(self, env_ids: torch.Tensor | None = None, hand_key=None):
+        self.current_finger_pos[hand_key] = {
+            k: self._robot.data.body_pos_w[:, link_idx] for k, link_idx in zip(self.hand_util[hand_key].position_tip_links, self.position_tip_link_indices[hand_key])
         }
 
-        self.target_finger_pos[key] = {
-            k: self.ref_finger_pos[key][:, i] for i, k in enumerate(self.hand_util[key].position_tip_links)
+        self.target_finger_pos[hand_key] = {
+            k: self.ref_finger_pos[hand_key][:, i] for i, k in enumerate(self.hand_util[hand_key].position_tip_links)
         }
-        contact_center = self.reference_traj_info.contact_center_world[key]
-        self.hand2obj[key] = compute_object_state_in_hand_frame(
+        contact_center = self.reference_traj_info.contact_center_world[hand_key]
+        self.hand2obj[hand_key] = compute_state_in_hand_frame(
             # self._obj.data.root_pos_w,  self._obj.data.root_quat_w,
-            contact_center, self.obj_rot,
+            contact_center, self.reference_traj_info.cwp_quat[hand_key],
+            self._robot.data.body_pos_w[:, self.eef_link_idx[hand_key]], self._robot.data.body_quat_w[:, self.eef_link_idx[hand_key]],
             self._obj.data.root_lin_vel_w, self._obj.data.root_ang_vel_w,
-            self._robot.data.body_pos_w[:, self.eef_link_idx[key]], self._robot.data.body_quat_w[:, self.eef_link_idx[key]],
-            self._robot.data.body_lin_vel_w[:, self.eef_link_idx[key]], self._robot.data.body_ang_vel_w[:, self.eef_link_idx[key]],
+            self._robot.data.body_lin_vel_w[:, self.eef_link_idx[hand_key]], self._robot.data.body_ang_vel_w[:, self.eef_link_idx[hand_key]],
             debug=False
         )
 
         # Contact
         if not self.robot_cfg.off_contact_sensor:
-            self.net_contact_forces[key]= self._contact_sensor.data.net_forces_w_history[:, :, self.force_tip_link_indices[key]]
+            self.net_contact_forces[hand_key]= self._contact_sensor.data.net_forces_w_history[:, :, self.force_tip_link_indices[hand_key]]
             # self.contact_normal = self._contact_sensor.data.normal_w[:, :, self.force_tip_link_indices]  # (N, T, 4, 3)
-            self.contact_position[key] = self._robot.data.body_pos_w[:, self.position_tip_link_indices[key]]
+            self.contact_position[hand_key] = self._robot.data.body_pos_w[:, self.position_tip_link_indices[hand_key]]
             # self.visualize_contact_forces_as_arrows(
             #     positions=self.contact_position,  # (N, 4, 3)
             #     forces=self.net_contact_forces[:, 0],  # Use the first time step for visualization
             #     scale=1.0
             # )
         else:
-            self.net_contact_forces[key] = None
-            self.contact_position[key] = torch.zeros((self.num_envs, 4, 3), device=self.device)
+            self.net_contact_forces[hand_key] = None
+            self.contact_position[hand_key] = torch.zeros((self.num_envs, 4, 3), device=self.device)
 
     def direction_to_quaternion(self, directions: torch.Tensor) -> torch.Tensor:
         """
@@ -984,22 +982,24 @@ class NextageShadowGraspEnv(DirectRLEnv):
         }
         return rewards
 
-    def _solve_base_joint(self, env_ids, pos, rot_quat):
+    def _solve_base_joint(self, env_ids, pos, rot_quat, hand_key):
         # pos: (..., 3)
         # rot_quat: (..., 4) (w, x, y, z)
         root_pose_w = self._robot.data.root_state_w[env_ids, :7]
         target_pos_b, target_rot_b = subtract_frame_transforms(
             root_pose_w[:, 0:3], root_pose_w[:, 3:7], pos, rot_quat
         )
-
-        def quat_to_euler_zyx(quat):
-            # quat: shape (..., 4) in (w, x, y, z)
+        # hand2eef = self.hand_util[hand_key].base2eef()
+        def quat_to_euler_xyz(quat):
+            # quat in (w, x, y, z)
             w, x, y, z = quat[..., 0], quat[..., 1], quat[..., 2], quat[..., 3]
 
+            # roll (X-axis rotation)
             sinr_cosp = 2 * (w * x + y * z)
             cosr_cosp = 1 - 2 * (x * x + y * y)
             roll = torch.atan2(sinr_cosp, cosr_cosp)
 
+            # pitch (Y-axis rotation)
             sinp = 2 * (w * y - z * x)
             pitch = torch.where(
                 torch.abs(sinp) >= 1,
@@ -1007,6 +1007,7 @@ class NextageShadowGraspEnv(DirectRLEnv):
                 torch.asin(sinp)
             )
 
+            # yaw (Z-axis rotation)
             siny_cosp = 2 * (w * z + x * y)
             cosy_cosp = 1 - 2 * (y * y + z * z)
             yaw = torch.atan2(siny_cosp, cosy_cosp)
@@ -1015,39 +1016,8 @@ class NextageShadowGraspEnv(DirectRLEnv):
 
         dof_pos = torch.zeros((pos.shape[0], 6), device=pos.device)
         dof_pos[:, 0:3] = target_pos_b  # Tx, Ty, Tz
-        dof_pos[:, 3:6] = quat_to_euler_zyx(target_rot_b)  # roll, pitch, yaw
+        dof_pos[:, 3:6] = quat_to_euler_xyz(target_rot_b)[:, [2, 1, 0]]  # roll, pitch, yaw
         return dof_pos, None
-
-    # def reset_trajectory(self, hand_key: str | None = None, env_ids: torch.Tensor | None = None):
-    #     """
-    #     Reset the trajectory for the specified environments.
-    #     This will reinitialize the reference trajectory information and IK targets.
-    #     """
-    #     if env_ids is None:
-    #         env_ids = self._robot._ALL_INDICES
-
-    #     self.activated_hand = hand_key if hand_key is not None else self.activated_hand
-    #     # self.ref_target_pos[hand_key][env_ids] =
-    #     # Reset the reference trajectory info for the specified environments
-    #     # cwp_config = {
-    #     #     "obj_position": self.obj_pos[env_ids],
-    #     #     "obj_orientation": torch.tensor([1, 0, 0, 0], device=self.device).repeat(len(env_ids), 1),
-    #     #     "obj_scale": self._obj_scales[env_ids],
-    #     # }
-    #     cwp = self.cwp_predictor.predict(
-    #         hand_laterality=self.activated_hand,
-    #         obj_position=self.obj_pos[env_ids],
-    #         obj_orientation=torch.tensor([1, 0, 0, 0], device=self.device).repeat(len(env_ids), 1),
-    #         obj_scale=self._obj_scales[env_ids],
-    #     )
-    #     ref_traj_cfg = self.hand_util[hand_key].getReferenceTrajInfo(
-    #         num_envs=len(env_ids), cwp=cwp, device=self.device
-    #     )
-    #     # Set the reference target positions and finger positions
-
-    #     self.ref_finger_pos[hand_key][env_ids] = cwp["position"]
-
-    #     self.reference_traj_info.update(hand_key, env_ids, **ref_traj_cfg, reset=True)
 
     def _visualize_cwp(self, env_ids: torch.Tensor | None = None):
         if env_ids is None:

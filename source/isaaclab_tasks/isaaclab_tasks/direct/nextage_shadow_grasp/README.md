@@ -5,6 +5,11 @@ HYDRA_FULL_ERROR=1  DOCKER_ISAACLAB_PATH=. DISPLAY=:0 ./isaaclab.sh -p scripts/r
 ```
 HYDRA_FULL_ERROR=1  DOCKER_ISAACLAB_PATH=. ./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py --task=Isaac-Nextage-Shadow-Grasp-Direct-v0 --num_envs 1024 env.grasp_type=passive env.object_type=superquadric --headless --logger wandb
 ```
+### Generate SQ objects
+```
+bash source/isaaclab_tasks/isaaclab_tasks/utils/convert_to_usd.sh
+```
+
 
 ### converting urdf to usd
 ```

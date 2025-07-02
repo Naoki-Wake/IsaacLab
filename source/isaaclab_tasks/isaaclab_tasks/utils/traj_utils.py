@@ -56,7 +56,8 @@ class ReferenceTrajInfo:
         self.objectQ_world      = torch.zeros((num_envs, 4), device=device)
         self.objectScale        = torch.ones((num_envs, 3), device=device)  # scale of the object
 
-        self.cwp               = torch.zeros((num_envs, len(self.hand_module.position_tip_links), 3), device=device)  # current workspace position
+        self.cwp_pos               = torch.zeros((num_envs, len(self.hand_module.position_tip_links), 3), device=device)  # current workspace position
+        self.cwp_quat              = torch.zeros((num_envs, 4), device=device)  # current workspace rotation
         self.contact_center_world = torch.zeros((num_envs, 3), device=device)  # contact center world position
 
         self.hand_preshape_joint = torch.zeros((num_envs, self.n_hand_joints), device=device)
@@ -77,8 +78,8 @@ class ReferenceTrajInfo:
                 # {"name": "init",     "start": 0.00, "end": 0.05},
                 {"name": "approach", "start": 0.00, "end": 0.40},
                 {"name": "grasp",    "start": 0.40, "end": 0.80},
-                {"name": "bring",     "start": 0.80, "end": 0.9, "param": {"delta": [0.0, 0.0, pick_height]}},
-                {"name": "bring",     "start": 0.9, "end": 1.00, "param": {"delta": [0.0, 0.0, 0.0]}},
+                {"name": "bring",     "start": 0.80, "end": 0.9, "param": {"deltaP": [0.0, 0.0, pick_height]}},
+                {"name": "bring",     "start": 0.9, "end": 1.00, "param": {"deltaP": [0.0, 0.0, 0.0]}},
                 # {"name": "release",  "start": 0.80, "end": 1.00,
                 #  "param": {"open_pose": open_pose.tolist()}},
             ]
@@ -98,7 +99,7 @@ class ReferenceTrajInfo:
                     # {"name": "init",     "start": 0.00, "end": 0.05},
                     {"name": "approach", "start": 0.0, "end": 0.4},
                     {"name": "grasp",    "start": 0.4, "end": 0.7},
-                    {"name": "bring",     "start": 0.7, "end": 1.0,  "param": {"delta": [0.0, -0.0, 0.1]}},
+                    {"name": "bring",     "start": 0.7, "end": 1.0,  "param": {"deltaP": [0.0, -0.0, 0.1], "deltaQ": [0.7071, -0.7071, 0.0, 0.0]}},
                 ]
             else:
                 subtasks = [
@@ -107,20 +108,33 @@ class ReferenceTrajInfo:
 
             if self.hand_module.hand_laterality == "left":
                 subtasks = [
-                    # {"name": "init",     "start": 0.00, "end": 0.05},
-                    {"name": "approach", "start": 0.00, "end": 0.2},
+                    # {"name": "approach", "start": 0.00, "end": 0.1, "param": {"prepare": True}},
+                    {"name": "approach", "start": 0.0, "end": 0.2},
                     {"name": "grasp",    "start": 0.2, "end": 0.3},
-                    {"name": "bring",     "start": 0.3, "end": 0.4,  "param": {"delta": [0.0, -0.0, 0.1]}},
-                    {"name": "bring",     "start": 0.4, "end": 0.7,  "param": {"delta": [0.0, 0.0, 0.0]}},
-                    {"name": "release",  "start": 0.7, "end": 0.8},
-                    {"name": "bring",     "start": 0.8, "end": 1.0,  "param": {"delta": [0.0, 0.2, 0.0]}},
+                    {"name": "bring",     "start": 0.3, "end": 0.4,  "param": {"deltaP": [0.0, 0.0, 0.1],  "deltaQ": [1, 0, 0, 0]}}, # [0.8660, -0.5000, 0.0, 0.0]}}, #"deltaQ": [0.7071, -0.7071, 0.0, 0.0]}},
+                    {"name": "bring",     "start": 0.4, "end": 0.8,  "param": {"deltaP": [0.0, 0.0, 0.0]}},
+                    {"name": "release",  "start": 0.8, "end": 0.9},
+                    {"name": "bring",     "start": 0.9, "end": 1.0,  "param": {"deltaP": [0.0, 0.2, 0.0]}},
                 ]
+                # subtasks = [
+                #     {"name": "init",     "start": 0.00, "end": 1.0, "param": {"init_pose": ([0.0, -0.5, 1.5], [0.1228, 0.6964, 0.6964, 0.1228])}},
+                # ]
             else:
+                # subtasks = [
+                #     # {"name": "approach", "start": 0.00, "end": 0.1, "param": {"prepare": True}},
+                #     {"name": "approach", "start": 0.0, "end": 0.2},
+                #     {"name": "grasp",    "start": 0.2, "end": 0.3},
+                #     {"name": "bring",     "start": 0.3, "end": 0.4,  "param": {"deltaP": [0.0, 0.0, 0.1],  "deltaQ": [1, 0, 0, 0]}}, #"deltaQ": [0.7071, -0.7071, 0.0, 0.0]}},
+                #     {"name": "bring",     "start": 0.4, "end": 0.8,  "param": {"deltaP": [0.0, 0.0, 0.0]}},
+                #     {"name": "release",  "start": 0.8, "end": 0.9},
+                #     {"name": "bring",     "start": 0.9, "end": 1.0,  "param": {"deltaP": [0.0, 0.2, 0.0]}},
+                # ]
                 subtasks = [
                     {"name": "init",     "start": 0.00, "end": 0.4, "param": {"init_pose": ([0.0, -0.5, 1.5], [0.1228, 0.6964, 0.6964, 0.1228])}},
-                    {"name": "approach", "start": 0.4, "end": 0.5},
-                    {"name": "grasp",    "start": 0.5, "end": 0.6},
-                    {"name": "bring",     "start": 0.6, "end": 1.0,  "param": {"delta": [0.0, 0.0, 0.0]}},
+                    # {"name": "approach", "start": 0.4, "end": 0.5, "param": {"prepare": True}},
+                    {"name": "approach", "start": 0.4, "end": 0.6},
+                    {"name": "grasp",    "start": 0.6, "end": 0.7},
+                    {"name": "bring",     "start": 0.7, "end": 1.0,  "param": {"deltaP": [0.0, 0.0, 0.0]}},
                 ]
                 # subtasks = [
                 #     {"name": "init",     "start": 0.00, "end": 1.0, "param": {"init_pose": ([0.0, -0.5, 1.5], [0.1228, 0.6964, 0.6964, 0.1228])}},
@@ -162,7 +176,9 @@ class ReferenceTrajInfo:
             pos += dP
 
         if dQ is not None:
-            quat = quat_mul(dQ, quat)
+            # quat = quat_mul(dQ, quat)
+            # WARNING:
+            quat = quat_mul(quat, dQ)  # dQ is in local frame, so we need to apply it after the interpolation
         return pos.float(), quat.float()
 
     def _interp_fingers(self, idx, ratio, dJ=None):
@@ -174,6 +190,18 @@ class ReferenceTrajInfo:
         # return joints.float()
         return self.finger_coupling_rule(joints).float()
 
+    def _estimate_cwp(self, env_ids: torch.Tensor):
+        cwp = self.cwp_predictor.predict(
+            obj_position=self.objectP_world[env_ids],
+            obj_orientation=self.objectQ_world[env_ids],
+            obj_scale=self.objectScale[env_ids],
+        )
+        ref_traj_cfg = self.hand_module.getReferenceTrajInfo(
+            num_envs=len(env_ids), cwp=cwp, device=self.device
+        )
+        self.cwp_pos[env_ids] = cwp["position"].to(self.device)
+        self.cwp_quat[env_ids] = cwp["orientation"].to(self.device)
+        self.update(env_ids, **ref_traj_cfg)
     # ------------------------------------------------------------------
     #  phase handlers
     # ------------------------------------------------------------------
@@ -187,22 +215,24 @@ class ReferenceTrajInfo:
 
     def _h_approach(self, idx, ratio, params, action_handP=None, action_handQ=None, action_hand_joint=None, **_):
         first = torch.logical_and(ratio > 0, ~self.approach_flg[idx])
+        is_prepare = params.get("prepare", False)
         if first.any():
             # detect
             env_ids = idx[first]
-            cwp = self.cwp_predictor.predict(
-                obj_position=self.objectP_world[env_ids],
-                obj_orientation=self.objectQ_world[env_ids],
-                obj_scale=self.objectScale[env_ids],
-            )
-            ref_traj_cfg = self.hand_module.getReferenceTrajInfo(
-                num_envs=len(env_ids), cwp=cwp, device=self.device
-            )
-            self.cwp[env_ids] = cwp["position"].to(self.device)
-            self.update(env_ids, **ref_traj_cfg)
+            self._estimate_cwp(env_ids)
             self.approach_flg[env_ids] = True
-        pos, quat = self._interp_eef(idx, ratio, action_handP, action_handQ)
-        fingers   = self._interp_fingers(idx, torch.zeros_like(ratio), action_hand_joint)
+            if action_handP is not None and action_handQ is not None and action_hand_joint is not None:
+                # make sure first action is not applied.
+                action_handP[env_ids] = torch.zeros_like(action_handP[env_ids])
+                action_handQ[env_ids] = torch.zeros_like(action_handQ[env_ids])
+                action_hand_joint[env_ids] = torch.zeros_like(action_hand_joint[env_ids])
+
+        if is_prepare:
+            pos, quat = self._interp_eef(idx, torch.zeros_like(ratio))
+            fingers = self._interp_fingers(idx, torch.zeros_like(ratio))
+        else:
+            pos, quat = self._interp_eef(idx, ratio, action_handP, action_handQ)
+            fingers   = self._interp_fingers(idx, torch.zeros_like(ratio), action_hand_joint)
         return pos, quat, fingers
 
     def _h_grasp(self, idx, ratio, params, action_handP=None, action_handQ=None, action_hand_joint=None, **_):
@@ -211,12 +241,13 @@ class ReferenceTrajInfo:
         return pos, quat, fingers
 
     def _h_bring(self, idx, ratio, params, current_handP_world=None, current_handQ_world=None, current_hand_joint=None, **_):
-        delta_list = params["delta"]
-        delta = torch.tensor(delta_list, device=self.device).unsqueeze(0)
+        deltaP, deltaQ = params["deltaP"], params.get("deltaQ", [1.0, 0.0, 0.0, 0.0])
+        deltaP = torch.tensor(deltaP, device=self.device).unsqueeze(0)
+        deltaQ = torch.tensor(deltaQ, device=self.device).unsqueeze(0)
         first = torch.logical_and(ratio > 0, ~self.pick_flg[idx])
         if first.any():
-            self.handP_world[idx[first]] = current_handP_world[first] + delta
-            self.handQ_world[idx[first]] = current_handQ_world[first]
+            self.handP_world[idx[first]] = current_handP_world[first] + deltaP
+            self.handQ_world[idx[first]] = quat_mul(deltaQ.repeat(len(idx[first]), 1), current_handQ_world[first])
             self.hand_shape_joint[idx[first]] = self.finger_decoupling_rule(current_hand_joint[first])
             self.pick_flg[idx[first]]    = True
         pos, quat = self._interp_eef(idx, ratio)

@@ -1431,7 +1431,7 @@
     <parent link="lh_arm_base_z"/>
     <child link="lh_arm_base_roll"/>
     <origin rpy="0 0 0" xyz="0 0 0"/>
-    <axis xyz="0 0 1"/>
+    <axis xyz="1 0 0"/>
     <limit effort="87" lower="-500" upper="500" velocity="2.1750"/>
   </joint>
   <joint name="lh_pitch" type="revolute">
@@ -1447,7 +1447,7 @@
     <parent link="lh_arm_base_pitch"/>
     <child link="lh_arm_base"/>
     <origin rpy="0 0 0" xyz="0 0 0"/>
-    <axis xyz="1 0 0"/>
+    <axis xyz="0 0 1"/>
     <limit effort="87" lower="-500" upper="500" velocity="2.1750"/>
   </joint>
 

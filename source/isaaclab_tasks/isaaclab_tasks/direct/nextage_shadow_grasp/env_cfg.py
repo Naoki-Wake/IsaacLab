@@ -82,7 +82,7 @@ class YCBObjCfg(ObjCfg):
 
         self.mat_cfg = RigidBodyMaterialCfg(
             static_friction=10,
-            dynamic_friction=9,
+            dynamic_friction=10,
             restitution=0.0,
             friction_combine_mode="average"
         )
@@ -95,7 +95,7 @@ class SQObjCfg(ObjCfg):
         if self.grasp_type == "active":
             self.obj_size_half = (0.035, 0.08, 0.08)  # Size of the cuboid obj in meters
         else:
-            self.obj_size_half = (0.03, 0.03, 0.10)
+            self.obj_size_half = (0.02, 0.02, 0.10)
         obj_asset_cfgs = [
             sim_utils.UsdFileCfg(
                 usd_path=obj_usd_path, scale=(0.1, 0.1, 0.1),

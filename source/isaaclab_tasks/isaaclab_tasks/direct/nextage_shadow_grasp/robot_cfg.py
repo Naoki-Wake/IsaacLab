@@ -31,10 +31,13 @@ class RobotCfg():
         # ]
 
         def _get_action_scale(grasp_type: str):
-            if grasp_type == "active":
-                action_scale = [0.01, 0.01, 0.01] + [0.0, 10.0 * DEG_TO_RAD, 0.0] + finger_action_scale + [1.0]
-            elif grasp_type == "passive":
-                action_scale = [0.01, 0.01, 0.0] + [0.0, 0.0, 10.0 * DEG_TO_RAD] + finger_action_scale + [1.0]
+            # WARN:
+            # if grasp_type == "active":
+            #     # action_scale = [0.015, 0.015, 0.015] + [0.0, 10.0 * DEG_TO_RAD, 0.0] + finger_action_scale + [1.0]
+            #
+            action_scale = [0.015, 0.015, 0.015] + [10.0 * DEG_TO_RAD, 0.0, 0.0] + finger_action_scale + [1.0]
+            # elif grasp_type == "passive":
+            # action_scale = [0.015, 0.015, 0.0] + [0.0, 0.0, 10.0 * DEG_TO_RAD] + finger_action_scale + [1.0]
             return action_scale
 
         if isinstance(grasp_type, str):
@@ -142,10 +145,14 @@ class NextageShadowRobotCfg(RobotCfg):
             ),
             offset=CameraCfg.OffsetCfg(pos=(0.0,0.0,0.0), rot=(0.58965,0.39028,-0.39028,-0.58965), convention="opengl"),
         )
-        self.arm_names = {"right": ["RARM_JOINT0", "RARM_JOINT1", "RARM_JOINT2", "RARM_JOINT3", "RARM_JOINT4", "RARM_JOINT5"],
-                          "left": ["LARM_JOINT0", "LARM_JOINT1", "LARM_JOINT2", "LARM_JOINT3", "LARM_JOINT4", "LARM_JOINT5"]}
-        self.hand_util = {"right": ShadowHandUtils(grasp_type=grasp_type, hand_laterality="right"),
-                          "left": ShadowHandUtils(grasp_type=grasp_type, hand_laterality="left")}
+        self.arm_names = {
+            "right": ["RARM_JOINT0", "RARM_JOINT1", "RARM_JOINT2", "RARM_JOINT3", "RARM_JOINT4", "RARM_JOINT5"],
+            "left": ["LARM_JOINT0", "LARM_JOINT1", "LARM_JOINT2", "LARM_JOINT3", "LARM_JOINT4", "LARM_JOINT5"]
+        }
+        self.hand_util = {
+            "right": ShadowHandUtils(grasp_type=grasp_type, hand_laterality="right"),
+            "left": ShadowHandUtils(grasp_type=grasp_type, hand_laterality="left")
+        }
         self.n_finger_joint = 16
         self.off_camera_sensor = False
         self.off_contact_sensor = False
@@ -204,10 +211,10 @@ class ShadowRobotMultiCfg(RobotCfg):
         self.usd_path = "scripts/my_models/shadow/floating_shadow_multi.usd"
         self.eef_keys = ["right", "left"]
         self.init_joint_pos = {
-            "rh_Tx": 0.0, "rh_Ty": 0.5, "rh_Tz": 0.0, "rh_roll": -math.pi/2, "rh_pitch": 0.0, "rh_yaw": -math.pi/2,
+            "rh_Tx": 0.0, "rh_Ty": 0.5, "rh_Tz": 0.0, "rh_roll": math.pi/2, "rh_pitch": math.pi/2, "rh_yaw": 0.0,
             "rh_FFJ4": 0.0, "rh_FFJ3": 0.0, "rh_FFJ2": 0.0, "rh_FFJ1": 0.0, "rh_MFJ4": 0.0, "rh_MFJ3": 0.0, "rh_MFJ2": 0.0, "rh_MFJ1": 0.0,
             "rh_RFJ4": 0.0, "rh_RFJ3": 0.0, "rh_RFJ2": 0.0, "rh_RFJ1": 0.0, "rh_THJ5": 0.0, "rh_THJ4": 0.0, "rh_THJ2": 0.0, "rh_THJ1": 0.0,
-            "lh_Tx": 0.0, "lh_Ty": -0.5, "lh_Tz": 0.0, "lh_roll": -math.pi/2, "lh_pitch": 0.0, "lh_yaw": -math.pi/2,
+            "lh_Tx": 0.0, "lh_Ty": -0.5, "lh_Tz": 0.0, "lh_roll": math.pi/2, "lh_pitch": math.pi/2, "lh_yaw": 0.0,
             "lh_FFJ4": 0.0, "lh_FFJ3": 0.0, "lh_FFJ2": 0.0, "lh_FFJ1": 0.0, "lh_MFJ4": 0.0, "lh_MFJ3": 0.0, "lh_MFJ2": 0.0, "lh_MFJ1": 0.0,
             "lh_RFJ4": 0.0, "lh_RFJ3": 0.0, "lh_RFJ2": 0.0, "lh_RFJ1": 0.0, "lh_THJ5": 0.0, "lh_THJ4": 0.0, "lh_THJ2": 0.0, "lh_THJ1": 0.0,
         }

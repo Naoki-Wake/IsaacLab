@@ -198,6 +198,12 @@ class HandUtils:
             "contact_center": config["contact_center"],
         }
 
+    def base2eef(self):
+        urdf = URDF.from_xml_file(self.urdf_path)
+        chain_name = urdf.get_chain(self.hand_base_link, self.ik_target_link, links=False)
+        base2eef = urdf_fk.chainname2trans(urdf, chain_name, [], fixed_excluded=False, get_com=False)
+        return base2eef
+
     def _compute_contactP_atload(self, handQ_world, skip=False):
         # transformation from finger tip to hand root
 
@@ -239,6 +245,7 @@ class ShadowHandUtils(HandUtils):
 
         hand_prefix = "rh" if hand_laterality == "right" else "lh"
         self.ik_target_link = f"{hand_prefix}_forearm"
+        self.hand_base_link = f"{hand_prefix}_arm_base"  # for hand-only simulation, use arm base as the IK target link
         # self.shape_joint = [-0.020622028419300796, 0.791124618965486, 0.7165877145100853, 0.0, 0.9159989384779349, 1.2087578520408695, -0.6628910395680104, 0.15071510414034017]
         # self.preshape_joint = [-0.020622028419300796, 0, 0, 0, 0, 1.2087578520408695, 0, 0]
 
@@ -530,13 +537,13 @@ class CWPPredictor(object):
             q = quat_mul(q_y, q_z)
             local_rotation = q[None, :].expand(obj_scale.shape[0], 4).to(self.device)
 
-            offset = torch.Tensor([0.02, -0.08, -0.03]).to(self.device)  # offset for passive grasp
+            offset = torch.Tensor([0.0, -0.08, -0.02]).to(self.device)  # offset for passive grasp
         elif self.grasp_type == "passive":
             ### TODO : check the finger offset for passive grasp
-            height = torch.ones_like(obj_scale[:, 2]) * 0.08  # [N] # 10 cm down from the top of the object
+            height = torch.ones_like(obj_scale[:, 2]) * 0.04  # [N] # 10 cm down from the top of the object
             # torch.clamp(obj_scale[:, 2] - 0.03, min=0.0)  # [N]# 3 cm down from the top of the object
-            depth = torch.ones_like(height) * 0.03  # [N] # 3 cm depth for the contact web position
-            finger_interval = torch.ones_like(height) * 0.03  # [N] # 2 cm interval between fingers
+            depth = torch.ones_like(height) * 0.015  # [N] # 3 cm depth for the contact web position
+            finger_interval = torch.ones_like(height) * 0.02  # [N] # 2 cm interval between fingers
             cwp_local = torch.stack([
                 torch.stack([depth, finger_interval, torch.zeros_like(height)], dim=1),               # rh_ffdistal
                 torch.stack([depth, torch.zeros_like(height), torch.zeros_like(height)], dim=1),           # rh_mfdistal
@@ -551,54 +558,14 @@ class CWPPredictor(object):
                 pitch=torch.tensor(deg2rad(0)),
                 yaw=torch.tensor(deg2rad(180))
             )
-            local_rotation = q_z[None, :].expand(obj_scale.shape[0], 4).to(self.device)
-            offset = torch.Tensor([0.05, 0.0, -0.05]).to(self.device)  # offset for passive grasp
-        else:
-            raise ValueError(f"Unsupported grasp type: {self.grasp_type}")
-
-        local_position = cwp_local
-        local_position = quat_apply(local_rotation[:, None, :].repeat(1, local_position.shape[1], 1), local_position)
-        local_position = local_position + offset[None, None, :]  # [N, P, 3]
-        return local_position, local_rotation
-
-
-    def predict_ycb_clearner(self, obj_scale):
-        offset = torch.zeros(3, device=self.device)  # default offset
-        local_rotation = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).expand(obj_scale.shape[0], 4)  # [N, 4]
-        if self.grasp_type == "active":
-            # ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal"]
-            # obj_center [x, y, z]
-            height = obj_scale[:, 2] - 0.05 # torch.clamp(obj_scale[:, 2] - 0.03, min=0.0)  # [N]# 3 cm down from the top of the object
-            cwp_local = torch.stack([
-                torch.stack([obj_scale[:, 0], 0.5 * obj_scale[:, 1], height], dim=1),               # rh_ffdistal
-                torch.stack([obj_scale[:, 0], torch.zeros_like(height), height], dim=1),           # rh_mfdistal
-                torch.stack([obj_scale[:, 0], -0.5 * obj_scale[:, 1], height], dim=1),              # rh_rfdistal
-                torch.stack([-obj_scale[:, 0], torch.zeros_like(height), height], dim=1)           # rh_thdistal
-            ], dim=1)  # shape: [N, 4, 3]
-            if self.hand_laterality == "right":
-                offset = torch.Tensor([-0.02, -0.02, -0.02]).to(self.device)
-            else:
-                offset = torch.Tensor([0.0, 0.10, 0.0]).to(self.device)
-        elif self.grasp_type == "passive":
-            ### TODO : check the finger offset for passive grasp
-            obj_scale = torch.Tensor([0.03, 0.03, 0.10]).expand(obj_scale.shape[0], 3).to(self.device) if obj_scale.dim() == 1 else obj_scale
-            half_z = 0.5 * obj_scale[:, 2]
-            cwp_local = torch.stack([
-                torch.stack([obj_scale[:, 0], torch.zeros_like(half_z), half_z], dim=1),                    # rh_ffdistal
-                torch.stack([obj_scale[:, 0], torch.zeros_like(half_z), torch.zeros_like(half_z)], dim=1),  # rh_mfdistal
-                torch.stack([obj_scale[:, 0], torch.zeros_like(half_z), -half_z], dim=1),                   # rh_rfdistal
-                torch.stack([-obj_scale[:, 0], torch.zeros_like(half_z), torch.zeros_like(half_z)], dim=1), # rh_thdistal
-                torch.stack([torch.zeros_like(half_z), -obj_scale[:, 1], torch.zeros_like(half_z)], dim=1)  # rh_palm
-            ], dim=1)  # shape: [N, 5, 3]
-
-            deg2rad = lambda deg: deg * torch.pi / 180
-            q_x = quat_from_euler_xyz(
-                roll=torch.tensor(deg2rad(-90)),
-                pitch=torch.tensor(0.0),
-                yaw=torch.tensor(0.0)
+            q_y = quat_from_euler_xyz(
+                roll=torch.tensor(deg2rad(0)),
+                pitch=torch.tensor(deg2rad(90)),
+                yaw=torch.tensor(deg2rad(0))
             )
-            local_rotation = q_x[None, :].expand(obj_scale.shape[0], 4).to(self.device)
-            offset = torch.Tensor([-0.02, -0.02, -0.03]).to(self.device)  # offset for passive grasp
+            q = quat_mul(q_y, q_z)
+            local_rotation = q[None, :].expand(obj_scale.shape[0], 4).to(self.device)
+            offset = torch.Tensor([0.03, 0.0, 0.00]).to(self.device)  # offset for passive grasp
         else:
             raise ValueError(f"Unsupported grasp type: {self.grasp_type}")
 
@@ -606,3 +573,49 @@ class CWPPredictor(object):
         local_position = quat_apply(local_rotation[:, None, :].repeat(1, local_position.shape[1], 1), local_position)
         local_position = local_position + offset[None, None, :]  # [N, P, 3]
         return local_position, local_rotation
+
+
+    # def predict_ycb_clearner(self, obj_scale):
+    #     offset = torch.zeros(3, device=self.device)  # default offset
+    #     local_rotation = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).expand(obj_scale.shape[0], 4)  # [N, 4]
+    #     if self.grasp_type == "active":
+    #         # ["rh_ffdistal", "rh_mfdistal", "rh_rfdistal", "rh_thdistal"]
+    #         # obj_center [x, y, z]
+    #         height = obj_scale[:, 2] - 0.05 # torch.clamp(obj_scale[:, 2] - 0.03, min=0.0)  # [N]# 3 cm down from the top of the object
+    #         cwp_local = torch.stack([
+    #             torch.stack([obj_scale[:, 0], 0.5 * obj_scale[:, 1], height], dim=1),               # rh_ffdistal
+    #             torch.stack([obj_scale[:, 0], torch.zeros_like(height), height], dim=1),           # rh_mfdistal
+    #             torch.stack([obj_scale[:, 0], -0.5 * obj_scale[:, 1], height], dim=1),              # rh_rfdistal
+    #             torch.stack([-obj_scale[:, 0], torch.zeros_like(height), height], dim=1)           # rh_thdistal
+    #         ], dim=1)  # shape: [N, 4, 3]
+    #         if self.hand_laterality == "right":
+    #             offset = torch.Tensor([-0.02, -0.02, -0.02]).to(self.device)
+    #         else:
+    #             offset = torch.Tensor([0.0, 0.10, 0.0]).to(self.device)
+    #     elif self.grasp_type == "passive":
+    #         ### TODO : check the finger offset for passive grasp
+    #         obj_scale = torch.Tensor([0.03, 0.03, 0.10]).expand(obj_scale.shape[0], 3).to(self.device) if obj_scale.dim() == 1 else obj_scale
+    #         half_z = 0.5 * obj_scale[:, 2]
+    #         cwp_local = torch.stack([
+    #             torch.stack([obj_scale[:, 0], torch.zeros_like(half_z), half_z], dim=1),                    # rh_ffdistal
+    #             torch.stack([obj_scale[:, 0], torch.zeros_like(half_z), torch.zeros_like(half_z)], dim=1),  # rh_mfdistal
+    #             torch.stack([obj_scale[:, 0], torch.zeros_like(half_z), -half_z], dim=1),                   # rh_rfdistal
+    #             torch.stack([-obj_scale[:, 0], torch.zeros_like(half_z), torch.zeros_like(half_z)], dim=1), # rh_thdistal
+    #             torch.stack([torch.zeros_like(half_z), -obj_scale[:, 1], torch.zeros_like(half_z)], dim=1)  # rh_palm
+    #         ], dim=1)  # shape: [N, 5, 3]
+
+    #         deg2rad = lambda deg: deg * torch.pi / 180
+    #         q_x = quat_from_euler_xyz(
+    #             roll=torch.tensor(deg2rad(-90)),
+    #             pitch=torch.tensor(0.0),
+    #             yaw=torch.tensor(0.0)
+    #         )
+    #         local_rotation = q_x[None, :].expand(obj_scale.shape[0], 4).to(self.device)
+    #         offset = torch.Tensor([-0.02, -0.03, -0.03]).to(self.device)  # offset for passive grasp
+    #     else:
+    #         raise ValueError(f"Unsupported grasp type: {self.grasp_type}")
+
+    #     local_position = cwp_local
+    #     local_position = quat_apply(local_rotation[:, None, :].repeat(1, local_position.shape[1], 1), local_position)
+    #     local_position = local_position + offset[None, None, :]  # [N, P, 3]
+    #     return local_position, local_rotation
