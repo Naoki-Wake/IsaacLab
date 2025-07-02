@@ -39,6 +39,7 @@ from .robot_cfg import get_robot_cfg, RobotCfg
 from isaaclab.sensors import CameraCfg, Camera
 from isaaclab.sensors import TiledCamera, TiledCameraCfg, save_images_to_file
 from isaaclab.sensors.camera.utils import create_pointcloud_from_depth
+from isaaclab.assets import AssetBaseCfg, AssetBase
 
 import cv2
 
@@ -183,6 +184,21 @@ class NextageShadowGraspEnvCfg(DirectRLEnvCfg):
             ),
         }
     )
+
+    overhead_light = AssetBaseCfg(
+        prim_path="/World/OverheadLight",
+        spawn=sim_utils.SphereLightCfg(
+            intensity=5000.0,
+            radius=0.1,
+            color=(1.0, 1.0, 1.0),
+            treat_as_point=False  # This parameter is valid
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=(0.0, 0.0, 1.8),
+            rot=(1.0, 0.0, 0.0, 0.0)  # Quaternion (w, x, y, z)
+        )
+    )
+
     # action_scale = [0.0 for _ in range(action_space)] # debug
     dof_velocity_scale = 0.1
 
@@ -450,8 +466,40 @@ class NextageShadowGraspEnv(DirectRLEnv):
         # self.scene.clone_environments(copy_from_source=False)
 
         # add lights
-        light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
+        light_cfg = sim_utils.DomeLightCfg(intensity=10.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
+
+
+        # 1. Create a SphereLight configuration
+        #cfg_sphere = sim_utils.SphereLightCfg(
+        #    radius=0.5,                 # Sphere radius in meters
+        #    intensity=5000.0,           # Linear intensity
+        #    color=(1.0, 1.0, 1.0),      # RGB color (linear)
+        #    exposure=0.0,               # Additional exposure control
+        #    treat_as_point=False,       # If True, simulates as a point light
+        #    enable_color_temperature=False,
+        #    color_temperature=6500.0,
+        #)
+#
+        ## 2. Spawn the light into the scene under a prim path
+        #cfg_sphere.func(
+        #    "/World/SphereLight1",      # Unique prim path
+        #    cfg_sphere, 
+        #    translation=(0, 0, 2),      # Position in world coordinates
+        #)
+
+        cfg_distant = sim_utils.DistantLightCfg(
+            intensity=3000.0,           # Brightness (in linear units)
+            color=(0.75, 0.75, 0.75),   # RGB light color
+            angle=0.53,                 # Angular size in degrees (default ≈ sun/moon)
+        )
+        # 90 deg around Y: local Z points along -X (light comes from +X to -X)
+        rotation_quat = (0.8660254, 0.5, 0.0, 0.0) 
+        cfg_distant.func(
+            "/World/Light/DistantLight",
+            cfg_distant,
+            orientation=rotation_quat,
+        )
 
         stage = get_current_stage()
         self._obj_sq_params = self._infer_sq_params(stage)
